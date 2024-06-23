@@ -173,7 +173,7 @@ export class DataStoreNoSql implements DataStore {
         recordId: response.Item.recordId.S?.toString(),
         tenant: response.Item.tenant.S?.toString(),
         dataCid: response.Item.dataCid.S?.toString(),
-        data: response.Item.B.toArray()
+        data: response.Item.data.B
     }
 
     // const result = await this.#db
@@ -189,10 +189,10 @@ export class DataStoreNoSql implements DataStore {
     // // }
 
     return {
-      dataSize   : result.data.length,
+      dataSize   : result.data ? result.data.length : 0,
       dataStream : new Readable({
         read() {
-          this.push(Buffer.from(result.data));
+          this.push(result.data ? Buffer.from(result.data) : null);
           this.push(null);
         }
       }),
