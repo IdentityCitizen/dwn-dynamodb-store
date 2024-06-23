@@ -1,0 +1,13 @@
+2024/06/23-21:56:09.974 3a2c Recovering log #742
+2024/06/23-21:56:09.974 3a2c Level-0 table #744: started
+2024/06/23-21:56:09.977 3a2c Level-0 table #744: 4522 bytes OK
+2024/06/23-21:56:09.985 3a2c Delete type=0 #742
+2024/06/23-21:56:09.985 3a2c Delete type=3 #741
+2024/06/23-21:56:09.986 6be8 Compacting 4@0 + 1@1 files
+2024/06/23-21:56:09.987 6be8 Compacted 4@0 + 1@1 files => 0 bytes
+2024/06/23-21:56:09.988 6be8 compacted to: files[ 0 0 0 0 0 0 0 ]
+2024/06/23-21:56:09.988 6be8 Delete type=2 #726
+2024/06/23-21:56:09.989 6be8 Delete type=2 #734
+2024/06/23-21:56:09.989 6be8 Delete type=2 #736
+2024/06/23-21:56:09.989 6be8 Delete type=2 #739
+2024/06/23-21:56:09.989 6be8 Delete type=2 #744
