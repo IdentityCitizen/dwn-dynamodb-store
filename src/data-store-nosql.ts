@@ -100,34 +100,6 @@ export class DataStoreNoSql implements DataStore {
     } catch ( error ) {
       console.error(error);
     }
-
-
-    // if (this.#db) {
-    //   return;
-    // }
-
-    // this.#db = new Kysely<DwnDatabaseType>({ dialect: this.#dialect });
-
-    // let table = this.#db.schema
-    //   .createTable('dataStore')
-    //   .ifNotExists()
-    //   .addColumn('tenant', 'varchar(255)', (col) => col.notNull())
-    //   .addColumn('recordId', 'varchar(60)', (col) => col.notNull())
-    //   .addColumn('dataCid', 'varchar(60)', (col) => col.notNull());
-
-    // // Add columns that have dialect-specific constraints
-    // table = this.#dialect.addAutoIncrementingColumn(table, 'id', (col) => col.primaryKey());
-    // table = this.#dialect.addBlobColumn(table, 'data', (col) => col.notNull());
-    // await table.execute();
-
-    // // Add index for efficient lookups.
-    // this.#db.schema
-    //   .createIndex('tenant_recordId_dataCid')
-    //   .ifNotExists()
-    //   .on('dataStore')
-    //   .columns(['tenant', 'recordId', 'dataCid'])
-    //   .unique()
-    //   .execute();
   }
 
   async close(): Promise<void> {
@@ -176,18 +148,6 @@ export class DataStoreNoSql implements DataStore {
         data: response.Item.data.B
     }
 
-    // const result = await this.#db
-    //   .selectFrom('dataStore')
-    //   .selectAll()
-    //   .where('tenant', '=', tenant)
-    //   .where('recordId', '=', recordId)
-    //   .where('dataCid', '=', dataCid)
-    //   .executeTakeFirst();
-
-    // // if (!result) {
-    // //   return undefined;
-    // // }
-
     return {
       dataSize   : result.data ? result.data.length : 0,
       dataStream : new Readable({
@@ -231,19 +191,6 @@ export class DataStoreNoSql implements DataStore {
     };
     const command = new PutItemCommand(input);
     await this.#client.send(command);
-    // if (!this.#db) {
-    //   throw new Error(
-    //     'Connection to database not open. Call `open` before using `put`.'
-    //   );
-    // }
-
-    // const bytes = await DataStream.toBytes(dataStream);
-    // const data = Buffer.from(bytes);
-
-    // await this.#db
-    //   .insertInto('dataStore')
-    //   .values({ tenant, recordId, dataCid, data })
-    //   .executeTakeFirstOrThrow();
 
     return {
       dataSize: bytes.length
@@ -267,17 +214,10 @@ export class DataStoreNoSql implements DataStore {
           'tenant': tenant, // Adjust 'primaryKey' based on your table's partition key
           'recordIdDataCid': recordId + "|" + dataCid
       })
-  };
-  
-  let deleteCommand = new DeleteItemCommand(deleteParams);
-  await this.#client.send(deleteCommand);
-
-    // await this.#db
-    //   .deleteFrom('dataStore')
-    //   .where('tenant', '=', tenant)
-    //   .where('recordId', '=', recordId)
-    //   .where('dataCid', '=', dataCid)
-    //   .execute();
+    };
+    
+    let deleteCommand = new DeleteItemCommand(deleteParams);
+    await this.#client.send(deleteCommand);
   }
 
   async clear(): Promise<void> {

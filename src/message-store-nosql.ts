@@ -17,88 +17,174 @@ import { DwnDatabaseType, KeyValues } from './types.js';
 import * as block from 'multiformats/block';
 import * as cbor from '@ipld/dag-cbor';
 import { Dialect } from './dialect/dialect.js';
+import { 
+  DynamoDBClient,
+  ListTablesCommand,
+  CreateTableCommand,
+  AttributeDefinition,
+  KeySchemaElement,
+  BillingMode,
+  TableClass,
+  GetItemCommand,
+  PutItemCommand,
+  ScanCommand,
+  DeleteItemCommand,
+  ScanCommandInput,
+  QueryCommand,
+  GlobalSecondaryIndex,
+  QueryCommandInput
+} from '@aws-sdk/client-dynamodb';
+import {
+  marshall
+} from '@aws-sdk/util-dynamodb'
 import { executeWithRetryIfDatabaseIsLocked } from './utils/transaction.js';
 import { extractTagsAndSanitizeIndexes } from './utils/sanitize.js';
 import { filterSelectQuery } from './utils/filter.js';
 import { sha256 } from 'multiformats/hashes/sha2';
 import { TagTables } from './utils/tags.js';
+import { v4 as uuidv4 } from 'uuid';
+import Cursor from 'pg-cursor';
+
 
 
 export class MessageStoreNoSql implements MessageStore {
   #dialect: Dialect;
   #tags: TagTables;
   #db: Kysely<DwnDatabaseType> | null = null;
+  #tableName: string = "messageStoreMessages";
+  #tagTableName: string = "messageStoreRecordsTags";
+  #client: DynamoDBClient;
 
   constructor(dialect: Dialect) {
-    this.#dialect = dialect;
     this.#tags = new TagTables(dialect, 'messageStoreMessages');
+    this.#dialect = dialect;
+    this.#client = new DynamoDBClient({
+      region: 'localhost',
+      endpoint: 'http://0.0.0.0:8006',
+      credentials: {
+        accessKeyId: 'MockAccessKeyId',
+        secretAccessKey: 'MockSecretAccessKey'
+      },
+    });
   }
 
   async open(): Promise<void> {
-    // if (this.#db) {
-    //   return;
-    // }
+    //console.log("Created client");
 
-    // this.#db = new Kysely<DwnDatabaseType>({ dialect: this.#dialect });
-    // let createTable = this.#db.schema
-    //   .createTable('messageStoreMessages')
-    //   .ifNotExists()
-    //   .addColumn('tenant', 'varchar(255)', (col) => col.notNull())
-    //   .addColumn('messageCid', 'varchar(60)', (col) => col.notNull())
-    //   .addColumn('encodedData', 'text') // we optionally store encoded data if it is below a threshold
-    //   // "indexes" start
-    //   .addColumn('interface', 'text')
-    //   .addColumn('method', 'text')
-    //   .addColumn('schema', 'text')
-    //   .addColumn('dataCid', 'text')
-    //   .addColumn('dataSize', 'integer')
-    //   .addColumn('dateCreated', 'text')
-    //   .addColumn('delegated', 'text')
-    //   .addColumn('messageTimestamp', 'text')
-    //   .addColumn('dataFormat', 'text')
-    //   .addColumn('isLatestBaseState', 'text')
-    //   .addColumn('published', 'text')
-    //   .addColumn('author', 'text')
-    //   .addColumn('recordId', 'varchar(60)')
-    //   .addColumn('entryId', 'text')
-    //   .addColumn('datePublished', 'text')
-    //   .addColumn('latest', 'text')
-    //   .addColumn('protocol', 'text')
-    //   .addColumn('dateExpires', 'text')
-    //   .addColumn('description', 'text')
-    //   .addColumn('grantedTo', 'text')
-    //   .addColumn('grantedBy', 'text')
-    //   .addColumn('grantedFor', 'text')
-    //   .addColumn('permissionsRequestId', 'text')
-    //   .addColumn('attester', 'text')
-    //   .addColumn('protocolPath', 'text')
-    //   .addColumn('recipient', 'text')
-    //   .addColumn('contextId', 'text')
-    //   .addColumn('parentId', 'text')
-    //   .addColumn('permissionGrantId', 'text')
-    //   .addColumn('prune', 'text');
-    //   // "indexes" end
+    const input = { // ListTablesInput
+      Limit: Number("1"),
+    };
+    const command = new ListTablesCommand(input);
+    const response = await this.#client.send(command);
+    //console.log(response);
 
-    // let createRecordsTagsTable = this.#db.schema
-    //   .createTable('messageStoreRecordsTags')
-    //   .ifNotExists()
-    //   .addColumn('tag', 'text', (col) => col.notNull())
-    //   .addColumn('valueString', 'text')
-    //   .addColumn('valueNumber', 'decimal');
+    // Does table already exist?
+    if ( response.TableNames ) {
+      //console.log("Found Table Names in response");
 
-    // // Add columns that have dialect-specific constraints
-    // createTable = this.#dialect.addAutoIncrementingColumn(createTable, 'id', (col) => col.primaryKey());
-    // createTable = this.#dialect.addBlobColumn(createTable, 'encodedMessageBytes', (col) => col.notNull());
-    // createRecordsTagsTable = this.#dialect.addAutoIncrementingColumn(createRecordsTagsTable, 'id', (col) => col.primaryKey());
-    // createRecordsTagsTable = this.#dialect.addReferencedColumn(createRecordsTagsTable, 'messageStoreRecordsTags', 'messageInsertId', 'integer', 'messageStoreMessages', 'id', 'cascade');
+      const tableExists = response.TableNames?.length > 0 && response.TableNames?.indexOf(this.#tableName) !== -1
+      if ( tableExists ) {
+        //console.log(this.#tableName + " TABLE ALREADY EXISTS");
+      } else {
+        //console.log("Trying to create table");
+        const createTableInput = { // CreateTableInput
+          AttributeDefinitions: [ // AttributeDefinitions // required
+            { // AttributeDefinition
+              AttributeName: "tenant", // required
+              AttributeType: "S", // required
+            } as AttributeDefinition,
+            { // AttributeDefinition
+              AttributeName: "messageCid", // required
+              AttributeType: "S", // required
+            } as AttributeDefinition,
+            { // AttributeDefinition
+              AttributeName: "dateCreated", // required
+              AttributeType: "S", // required
+            } as AttributeDefinition,
+            { // AttributeDefinition
+              AttributeName: "datePublished", // required
+              AttributeType: "S", // required
+            } as AttributeDefinition,
+            { // AttributeDefinition
+              AttributeName: "messageTimestamp", // required
+              AttributeType: "S", // required
+            } as AttributeDefinition
+          ],
+          TableName: this.#tableName, // required
+          KeySchema: [ // KeySchema // required
+            { // KeySchemaElement
+              AttributeName: "tenant", // required
+              KeyType: "HASH", // required
+            } as KeySchemaElement,
+            { // KeySchemaElement
+              AttributeName: "messageCid", // required
+              KeyType: "RANGE", // required
+            } as KeySchemaElement,
+          ],
+          GlobalSecondaryIndexes: [
+            {
+                IndexName: "dateCreated",
+                KeySchema: [
+                    { AttributeName: "tenant", KeyType: 'HASH' } as KeySchemaElement, // GSI partition key
+                    { AttributeName: "dateCreated", KeyType: 'RANGE' } as KeySchemaElement // Optional GSI sort key
+                ],
+                Projection: {
+                    ProjectionType: 'ALL' // Adjust as needed ('ALL', 'KEYS_ONLY', 'INCLUDE')
+                },
+                ProvisionedThroughput: {
+                    ReadCapacityUnits: 5, // Adjust as needed
+                    WriteCapacityUnits: 5 // Adjust as needed
+                }
+            } as GlobalSecondaryIndex,
+            {
+              IndexName: "datePublished",
+              KeySchema: [
+                  { AttributeName: "tenant", KeyType: 'HASH' } as KeySchemaElement, // GSI partition key
+                  { AttributeName: "datePublished", KeyType: 'RANGE' } as KeySchemaElement // Optional GSI sort key
+              ],
+              Projection: {
+                  ProjectionType: 'ALL' // Adjust as needed ('ALL', 'KEYS_ONLY', 'INCLUDE')
+              },
+              ProvisionedThroughput: {
+                  ReadCapacityUnits: 5, // Adjust as needed
+                  WriteCapacityUnits: 5 // Adjust as needed
+              }
+            } as GlobalSecondaryIndex,
+            {
+              IndexName: "messageTimestamp",
+              KeySchema: [
+                  { AttributeName: "tenant", KeyType: 'HASH' } as KeySchemaElement, // GSI partition key
+                  { AttributeName: "messageTimestamp", KeyType: 'RANGE' } as KeySchemaElement // Optional GSI sort key
+              ],
+              Projection: {
+                  ProjectionType: 'ALL' // Adjust as needed ('ALL', 'KEYS_ONLY', 'INCLUDE')
+              },
+              ProvisionedThroughput: {
+                  ReadCapacityUnits: 5, // Adjust as needed
+                  WriteCapacityUnits: 5 // Adjust as needed
+              }
+            } as GlobalSecondaryIndex
+          ],
+          BillingMode: "PAY_PER_REQUEST" as BillingMode,
+          TableClass: "STANDARD" as TableClass,
+        };
 
-    // await createTable.execute();
-    // await createRecordsTagsTable.execute();
+        //console.log("Create Table command");
+        const createTableCommand = new CreateTableCommand(createTableInput);
+
+        //console.log("Send table command");
+        try {
+          const createTableResponse = await this.#client.send(createTableCommand);
+          //console.log(createTableResponse);
+        } catch ( error ) {
+          //console.error(error);
+        }
+      }
+    }
   }
 
   async close(): Promise<void> {
-    await this.#db?.destroy();
-    this.#db = null;
+    this.#client.destroy();
   }
 
   async put(
@@ -107,7 +193,7 @@ export class MessageStoreNoSql implements MessageStore {
     indexes: KeyValues,
     options?: MessageStoreOptions
   ): Promise<void> {
-    if (!this.#db) {
+    if (!this.#client) {
       throw new Error(
         'Connection to database not open. Call `open` before using `put`.'
       );
@@ -125,6 +211,8 @@ export class MessageStoreNoSql implements MessageStore {
         if(data) {
           delete (message as any).encodedData;
           encodedData = data;
+          //console.log("ENCODED DATA");
+          //console.log(encodedData);
         }
       }
       return { message, encodedData };
@@ -140,51 +228,43 @@ export class MessageStoreNoSql implements MessageStore {
     const messageCid = encodedMessageBlock.cid.toString();
     const encodedMessageBytes = Buffer.from(encodedMessageBlock.bytes);
 
-    // we execute the insert in a transaction as we are making multiple inserts into multiple tables.
-    // if any of these inserts would throw, the whole transaction would be rolled back.
-    // otherwise it is committed.
-    const putMessageOperation = this.constructPutMessageOperation({ tenant, messageCid, encodedMessageBytes, encodedData, indexes });
-    await executeWithRetryIfDatabaseIsLocked(this.#db, putMessageOperation);
-  }
+    // In SQL this is split into an insert into a tags table and the message table.
+    // Since we're working with docs here, there should be no reason why we can't
+    // put it in one write.
+    const { indexes: putIndexes, tags } = extractTagsAndSanitizeIndexes(indexes);
+    const input = {
+      "Item": {
+        "tenant": {
+          "S": tenant
+        },
+        "messageCid": {
+          "S": messageCid
+        },
+        "encodedMessageBytes": {
+          "B": encodedMessageBytes
+        },
+        ...tags,
+        ...putIndexes
+      },
+      "TableName": this.#tableName
+    };
 
-  /**
-   * Constructs the transactional operation to insert the given message into the database.
-   */
-  private constructPutMessageOperation(queryOptions: {
-    tenant: string;
-    messageCid: string;
-    encodedMessageBytes: Buffer;
-    encodedData: string | null;
-    indexes: KeyValues;
-  }): (tx: Transaction<DwnDatabaseType>) => Promise<void> {
-    // const { tenant, messageCid, encodedMessageBytes, encodedData, indexes } = queryOptions;
+    if ( encodedData !== null ) {
+      input.Item["encodedData"] = {
+        "S": encodedData
+      }
+    } 
 
-    // // we extract the tag indexes into their own object to be inserted separately.
-    // // we also sanitize the indexes to convert any `boolean` values to `text` representations.
-    // const { indexes: putIndexes, tags } = extractTagsAndSanitizeIndexes(indexes);
-
-    // return async (tx) => {
-
-    //   const messageIndexValues = {
-    //     tenant,
-    //     messageCid,
-    //     encodedMessageBytes,
-    //     encodedData,
-    //     ...putIndexes
-    //   };
-
-    //   // we use the dialect-specific `insertThenReturnId` in order to be able to extract the `insertId`
-    //   const result = await this.#dialect
-    //     .insertThenReturnId(tx, 'messageStoreMessages', messageIndexValues, 'id as insertId')
-    //     .executeTakeFirstOrThrow();
-
-    //   // if tags exist, we execute those within the transaction associating them with the `insertId`.
-    //   if (Object.keys(tags).length > 0) {
-    //     await this.#tags.executeTagsInsert(result.insertId, tags, tx);
-    //   }
-
-    // };
-    return async (tx) => {};
+    //console.log("PUT:");
+    //console.log(input);
+    const command = new PutItemCommand(input);
+    try {
+      await this.#client.send(command);
+    } catch ( error ) {
+      //console.log("FAILED");
+      //console.error(error);
+    }
+    
   }
 
   async get(
@@ -192,29 +272,43 @@ export class MessageStoreNoSql implements MessageStore {
     cid: string,
     options?: MessageStoreOptions
   ): Promise<GenericMessage | undefined> {
-    if (!this.#db) {
+    if (!this.#client) {
       throw new Error(
         'Connection to database not open. Call `open` before using `get`.'
       );
     }
 
-    options?.signal?.throwIfAborted();
+    const input = { // GetItemInput
+      TableName: this.#tableName, // required
+      Key: { // Key // required
+        "tenant": { // AttributeValue Union: only one key present
+          S: tenant,
+        },
+        "messageCid": {
+          S: cid
+        }
+      },
+      AttributesToGet: [ // AttributeNameList
+        "tenant", "messageCid", "encodedMessageBytes", "encodedData"
+      ]
+    };
+    const command = new GetItemCommand(input);
+    const response = await this.#client.send(command);
+    response.Item
 
-    const result = await executeUnlessAborted(
-      this.#db
-        .selectFrom('messageStoreMessages')
-        .selectAll()
-        .where('tenant', '=', tenant)
-        .where('messageCid', '=', cid)
-        .executeTakeFirst(),
-      options?.signal
-    );
-
-    if (!result) {
+    if ( !response.Item ) {
       return undefined;
     }
 
-    return this.parseEncodedMessage(result.encodedMessageBytes, result.encodedData, options);
+    const result = {
+        tenant: response.Item.tenant.S?.toString(),
+        messageCid: response.Item.messageCid.S?.toString(),
+        encodedMessageBytes: response.Item.encodedMessageBytes.B,
+        encodedData: response.Item.encodedData.S?.toString()
+    };
+
+    return this.parseEncodedMessage(result.encodedMessageBytes ? result.encodedMessageBytes: Buffer.from(""), result.encodedData, options);
+    
   }
 
   async query(
@@ -224,64 +318,135 @@ export class MessageStoreNoSql implements MessageStore {
     pagination?: Pagination,
     options?: MessageStoreOptions
   ): Promise<{ messages: GenericMessage[], cursor?: PaginationCursor}> {
-    if (!this.#db) {
-      throw new Error(
-        'Connection to database not open. Call `open` before using `query`.'
-      );
-    }
-
-    options?.signal?.throwIfAborted();
-
-    // extract sort property and direction from the supplied messageSort
+    //console.log("QUERY")
     const { property: sortProperty, direction: sortDirection } = this.extractSortProperties(messageSort);
 
-    let query = this.#db
-      .selectFrom('messageStoreMessages')
-      .leftJoin('messageStoreRecordsTags', 'messageStoreRecordsTags.messageInsertId', 'messageStoreMessages.id')
-      .select('messageCid')
-      .distinct()
-      .select([
-        'encodedMessageBytes',
-        'encodedData',
-        sortProperty,
-      ])
-      .where('tenant', '=', tenant);
+    let params: any = null;
+    if ( pagination?.cursor ) {
+      if ( messageSort ) {
+        params = this.cursorInputSort(tenant, pagination, sortProperty, sortDirection);
+      } else {
+        params = this.cursorInput(tenant, pagination)
+      }
+    } else {
+      params = {
+        TableName: this.#tableName,
+        KeyConditionExpression: '#tenant = :tenant',
+        ExpressionAttributeNames: {
+            '#tenant': "tenant" // Replace with your actual hash key attribute name
+        },
+        ExpressionAttributeValues: marshall({
+            ':tenant': tenant
+        })
+      };
 
-    // filter sanitization takes place within `filterSelectQuery`
-    query = filterSelectQuery(filters, query);
-
-    if(pagination?.cursor !== undefined) {
-      // currently the sort property is explicitly either `dateCreated` | `messageTimestamp` | `datePublished` which are all strings
-      // TODO: https://github.com/TBD54566975/dwn-sdk-js/issues/664 to handle the edge case
-      const cursorValue = pagination.cursor.value as string;
-      const cursorMessageId = pagination.cursor.messageCid;
-
-      query = query.where(({ eb, refTuple, tuple }) => {
-        const direction = sortDirection === SortDirection.Ascending ? '>' : '<';
-        // https://kysely-org.github.io/kysely-apidoc/interfaces/ExpressionBuilder.html#refTuple
-        return eb(refTuple(sortProperty, 'messageCid'), direction, tuple(cursorValue, cursorMessageId));
-      });
+      if ( pagination?.limit ) {
+        params["Limit"] = pagination.limit
+      }
+      if ( pagination?.cursor ) {
+        params["ExclusiveStartKey"] = JSON.parse(pagination.cursor.messageCid)
+      }
     }
 
-    const orderDirection = sortDirection === SortDirection.Ascending ? 'asc' : 'desc';
-    // sorting by the provided sort property, the tiebreak is always in ascending order regardless of sort
-    query =  query
-      .orderBy(sortProperty, orderDirection)
-      .orderBy('messageCid', orderDirection);
+    try {
+      //console.log("PARAMS");
+      //console.log(params);
+        const command = new QueryCommand(params);
+        const data = await this.#client.send(command);
 
-    if (pagination?.limit !== undefined && pagination?.limit > 0) {
-      // we query for one additional record to decide if we return a pagination cursor or not.
-      query = query.limit(pagination.limit + 1);
+        // Extract and return the items from the response
+        if (data.Items) {
+          //console.log("RAW RESULTS");
+          //console.log(data);
+          const results = await this.processPaginationResults(data.Items, sortProperty, data.LastEvaluatedKey, pagination?.limit, options);
+          //console.log("PROCESSED");
+          //console.log(results);
+          return results;
+        } else {
+          return { messages: []};
+        }
+    } catch (err) {
+        //console.error("Error retrieving items:", err);
+        throw err;
     }
 
-    const results = await executeUnlessAborted(
-      query.execute(),
-      options?.signal
-    );
 
-    // prunes the additional requested message, if it exists, and adds a cursor to the results.
-    // also parses the encoded message for each of the returned results.
-    return this.processPaginationResults(results, sortProperty, pagination?.limit, options);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    // if (!this.#db) {
+    //   throw new Error(
+    //     'Connection to database not open. Call `open` before using `query`.'
+    //   );
+    // }
+
+    // options?.signal?.throwIfAborted();
+
+    // // extract sort property and direction from the supplied messageSort
+    // const { property: sortProperty, direction: sortDirection } = this.extractSortProperties(messageSort);
+
+    // let query = this.#db
+    //   .selectFrom('messageStoreMessages')
+    //   .leftJoin('messageStoreRecordsTags', 'messageStoreRecordsTags.messageInsertId', 'messageStoreMessages.id')
+    //   .select('messageCid')
+    //   .distinct()
+    //   .select([
+    //     'encodedMessageBytes',
+    //     'encodedData',
+    //     sortProperty,
+    //   ])
+    //   .where('tenant', '=', tenant);
+
+    // // filter sanitization takes place within `filterSelectQuery`
+    // query = filterSelectQuery(filters, query);
+
+    // if(pagination?.cursor !== undefined) {
+    //   // currently the sort property is explicitly either `dateCreated` | `messageTimestamp` | `datePublished` which are all strings
+    //   // TODO: https://github.com/TBD54566975/dwn-sdk-js/issues/664 to handle the edge case
+    //   const cursorValue = pagination.cursor.value as string;
+    //   const cursorMessageId = pagination.cursor.messageCid;
+
+    //   query = query.where(({ eb, refTuple, tuple }) => {
+    //     const direction = sortDirection === SortDirection.Ascending ? '>' : '<';
+    //     // https://kysely-org.github.io/kysely-apidoc/interfaces/ExpressionBuilder.html#refTuple
+    //     return eb(refTuple(sortProperty, 'messageCid'), direction, tuple(cursorValue, cursorMessageId));
+    //   });
+    // }
+
+    // const orderDirection = sortDirection === SortDirection.Ascending ? 'asc' : 'desc';
+    // // sorting by the provided sort property, the tiebreak is always in ascending order regardless of sort
+    // query =  query
+    //   .orderBy(sortProperty, orderDirection)
+    //   .orderBy('messageCid', orderDirection);
+
+    // if (pagination?.limit !== undefined && pagination?.limit > 0) {
+    //   // we query for one additional record to decide if we return a pagination cursor or not.
+    //   query = query.limit(pagination.limit + 1);
+    // }
+
+    // const results = await executeUnlessAborted(
+    //   query.execute(),
+    //   options?.signal
+    // );
+
+    // // prunes the additional requested message, if it exists, and adds a cursor to the results.
+    // // also parses the encoded message for each of the returned results.
+    // return this.processPaginationResults(results, sortProperty, pagination?.limit, options);
   }
 
   async delete(
@@ -289,34 +454,65 @@ export class MessageStoreNoSql implements MessageStore {
     cid: string,
     options?: MessageStoreOptions
   ): Promise<void> {
-    if (!this.#db) {
+    if (!this.#client) {
       throw new Error(
         'Connection to database not open. Call `open` before using `delete`.'
       );
     }
 
-    options?.signal?.throwIfAborted();
-
-    await executeUnlessAborted(
-      this.#db
-        .deleteFrom('messageStoreMessages')
-        .where('tenant', '=', tenant)
-        .where('messageCid', '=', cid)
-        .execute(),
-      options?.signal
-    );
+    let deleteParams = {
+      TableName: this.#tableName,
+      Key: marshall({
+          'tenant': tenant, // Adjust 'primaryKey' based on your table's partition key
+          'messageCid': cid
+      })
+    };
+    let deleteCommand = new DeleteItemCommand(deleteParams);
+    await this.#client.send(deleteCommand);
   }
 
   async clear(): Promise<void> {
-    if (!this.#db) {
+    if (!this.#client) {
       throw new Error(
         'Connection to database not open. Call `open` before using `clear`.'
       );
     }
 
-    await this.#db
-      .deleteFrom('messageStoreMessages')
-      .execute();
+    try {
+      let scanParams: ScanCommandInput = {
+          TableName: this.#tableName
+      };
+
+      let scanCommand = new ScanCommand(scanParams);
+      let scanResult;
+      
+      do {
+          scanResult = await this.#client.send(scanCommand);
+
+          // Delete each item
+          for (let item of scanResult.Items) {
+              let deleteParams = {
+                  TableName: this.#tableName,
+                  Key: marshall({
+                      'tenant': item.tenant.S.toString(), // Adjust 'primaryKey' based on your table's partition key
+                      'messageCid': item.messageCid.S.toString()
+                  })
+              };
+              
+              let deleteCommand = new DeleteItemCommand(deleteParams);
+              await this.#client.send(deleteCommand);
+              //console.log("Deleted item successfully");
+          }
+
+          // Continue scanning if we have more items
+          scanParams.ExclusiveStartKey = scanResult.LastEvaluatedKey;
+
+      } while (scanResult.LastEvaluatedKey);
+
+      //console.log("Successfully cleared all data from " + this.#tableName );
+    } catch (err) {
+        //console.error('Unable to clear table:', err);
+    }
   }
 
   private async parseEncodedMessage(
@@ -337,6 +533,8 @@ export class MessageStoreNoSql implements MessageStore {
     // We store encodedData when the data is below a certain threshold.
     // https://github.com/TBD54566975/dwn-sdk-js/pull/456
     if (message !== undefined && encodedData !== undefined && encodedData !== null) {
+      //console.log("WE GOT HERE");
+      //console.log(encodedData);
       (message as any).encodedData = encodedData;
     }
     return message;
@@ -355,6 +553,7 @@ export class MessageStoreNoSql implements MessageStore {
   private async processPaginationResults(
     results: any[],
     sortProperty: string,
+    lastEvaluatedKey: any,
     limit?: number,
     options?: MessageStoreOptions,
   ): Promise<{ messages: GenericMessage[], cursor?: PaginationCursor}> {
@@ -362,15 +561,14 @@ export class MessageStoreNoSql implements MessageStore {
     // we now check if the returned results are greater than the limit, if so we pluck the last item out of the result set
     // the cursor is always the last item in the *returned* result so we use the last item in the remaining result set to build a cursor
     let cursor: PaginationCursor | undefined;
-    if (limit !== undefined && results.length > limit) {
-      results = results.slice(0, limit);
+    if (limit !== undefined && results.length == limit) {
       const lastMessage = results.at(-1);
       const cursorValue = lastMessage[sortProperty];
-      cursor = { messageCid: lastMessage.messageCid, value: cursorValue };
+      cursor = { messageCid: lastEvaluatedKey, value: cursorValue };
     }
 
     // extracts the full encoded message from the stored blob for each result item.
-    const messages: Promise<GenericMessage>[] = results.map(r => this.parseEncodedMessage(r.encodedMessageBytes, r.encodedData, options));
+    const messages: Promise<GenericMessage>[] = results.map(r => this.parseEncodedMessage(new Uint8Array(r.encodedMessageBytes.B), r.encodedData?.S, options));
     return { messages: await Promise.all(messages), cursor };
   }
 
@@ -389,5 +587,71 @@ export class MessageStoreNoSql implements MessageStore {
     } else {
       return  { property: 'messageTimestamp', direction: SortDirection.Ascending };
     }
+  }
+
+
+  /**
+   * Extracts the appropriate sort property and direction given a MessageSort object.
+   */
+  private cursorInput(
+    tenant: string,
+    pagination: Pagination
+  ): any {
+    const params: QueryCommandInput = {
+      TableName: this.#tableName,
+      KeyConditionExpression: '#tenant = :tenant',
+      ExpressionAttributeNames: {
+          '#tenant': "tenant" // Replace with your actual hash key attribute name
+      },
+      ExpressionAttributeValues: marshall({
+          ':tenant': tenant
+      })
+    };
+
+    if ( pagination?.limit ) {
+      params["Limit"] = pagination.limit
+    }
+    if ( pagination?.cursor ) {
+      params["ExclusiveStartKey"] = JSON.parse(pagination.cursor.messageCid)
+    }
+
+    //console.log(params);
+
+    return params;
+  }
+
+  /**
+   * Extracts the appropriate sort property and direction given a MessageSort object.
+   */
+  private cursorInputSort(
+    tenant: string,
+    pagination: Pagination,
+    sortAttribute: string,
+    sortDirection: SortDirection
+  ): any {
+    const direction = sortDirection == SortDirection.Ascending ? true : false;
+    const params: QueryCommandInput = {
+      TableName: this.#tableName,
+      IndexName: sortAttribute,
+      KeyConditionExpression: '#tenant = :tenant',
+      ExpressionAttributeNames: {
+          '#tenant': "tenant" // Replace with your actual hash key attribute name
+      },
+      ExpressionAttributeValues: marshall({
+          ':tenant': tenant
+      }),
+      ScanIndexForward: direction
+    };
+
+    if ( pagination?.limit ) {
+      params["Limit"] = pagination.limit
+    }
+    if ( pagination?.cursor ) {
+      params["ExclusiveStartKey"] = JSON.parse(pagination.cursor.messageCid)
+    }
+
+    //console.log(params);
+
+    return params;
   }
 }

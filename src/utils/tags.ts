@@ -20,7 +20,7 @@ export class TagTables {
    * Inserts the given tags associated with the given foreign `insertId`.
    */
   async executeTagsInsert(
-    foreignInsertId: number,
+    foreignInsertId: string,
     tags: KeyValues,
     tx: Transaction<DwnDatabaseType>,
   ):Promise<void> {

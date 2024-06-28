@@ -1,5 +1,5 @@
-2024/06/24-08:02:23.600 4b6c Recovering log #985
-2024/06/24-08:02:23.601 4b6c Level-0 table #987: started
-2024/06/24-08:02:23.607 4b6c Level-0 table #987: 4580 bytes OK
-2024/06/24-08:02:23.616 4b6c Delete type=0 #985
-2024/06/24-08:02:23.617 4b6c Delete type=3 #984
+2024/06/28-16:33:48.024 62c Recovering log #1764
+2024/06/28-16:33:48.025 62c Level-0 table #1766: started
+2024/06/28-16:33:48.027 62c Level-0 table #1766: 1122 bytes OK
+2024/06/28-16:33:48.036 62c Delete type=0 #1764
+2024/06/28-16:33:48.036 62c Delete type=3 #1763

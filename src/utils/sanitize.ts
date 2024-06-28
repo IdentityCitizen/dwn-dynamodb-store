@@ -2,8 +2,8 @@ import { Filter } from '@tbd54566975/dwn-sdk-js';
 import { KeyValues } from '../types.js';
 
 export function extractTagsAndSanitizeIndexes(records: KeyValues): {
-  tags: KeyValues;
-  indexes: KeyValues;
+  tags;
+  indexes;
 } {
 
   const tags = {};
@@ -24,7 +24,7 @@ export function extractTagsAndSanitizeIndexes(records: KeyValues): {
   return { tags, indexes };
 }
 
-export function sanitizeIndexes(records: KeyValues) {
+export function sanitizeIndexes(records) {
   for (let key in records) {
     let value = records[key];
     if (Array.isArray(value)) {
@@ -32,11 +32,11 @@ export function sanitizeIndexes(records: KeyValues) {
       for (const valueItem of value) {
         sanitizedValues.push(sanitizedValue(valueItem));
       }
-      records[key] = sanitizedValues;
+      records[key] = { "S": JSON.stringify(sanitizedValues) };
       continue;
     }
 
-    records[key] = sanitizedValue(value);
+    records[key] = { "S": sanitizedValue(value) };
   }
 }
 
