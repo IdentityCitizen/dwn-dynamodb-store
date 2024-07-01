@@ -66,6 +66,9 @@ export class MessageStoreNoSql implements MessageStore {
         secretAccessKey: 'MockSecretAccessKey'
       },
     });
+    // this.#client = new DynamoDBClient({
+    //   region: 'us-west-2'
+    // });
   }
 
   async open(): Promise<void> {
@@ -130,10 +133,6 @@ export class MessageStoreNoSql implements MessageStore {
                 ],
                 Projection: {
                     ProjectionType: 'ALL' // Adjust as needed ('ALL', 'KEYS_ONLY', 'INCLUDE')
-                },
-                ProvisionedThroughput: {
-                    ReadCapacityUnits: 5, // Adjust as needed
-                    WriteCapacityUnits: 5 // Adjust as needed
                 }
             } as GlobalSecondaryIndex,
             {
@@ -144,10 +143,6 @@ export class MessageStoreNoSql implements MessageStore {
               ],
               Projection: {
                   ProjectionType: 'ALL' // Adjust as needed ('ALL', 'KEYS_ONLY', 'INCLUDE')
-              },
-              ProvisionedThroughput: {
-                  ReadCapacityUnits: 5, // Adjust as needed
-                  WriteCapacityUnits: 5 // Adjust as needed
               }
             } as GlobalSecondaryIndex,
             {
@@ -158,10 +153,6 @@ export class MessageStoreNoSql implements MessageStore {
               ],
               Projection: {
                   ProjectionType: 'ALL' // Adjust as needed ('ALL', 'KEYS_ONLY', 'INCLUDE')
-              },
-              ProvisionedThroughput: {
-                  ReadCapacityUnits: 5, // Adjust as needed
-                  WriteCapacityUnits: 5 // Adjust as needed
               }
             } as GlobalSecondaryIndex
           ],
@@ -177,7 +168,7 @@ export class MessageStoreNoSql implements MessageStore {
           const createTableResponse = await this.#client.send(createTableCommand);
           //console.log(createTableResponse);
         } catch ( error ) {
-          //console.error(error);
+          console.error(error);
         }
       }
     }
@@ -198,6 +189,8 @@ export class MessageStoreNoSql implements MessageStore {
         'Connection to database not open. Call `open` before using `put`.'
       );
     }
+
+    //console.log(JSON.stringify(message));
 
     options?.signal?.throwIfAborted();
 
@@ -277,38 +270,48 @@ export class MessageStoreNoSql implements MessageStore {
         'Connection to database not open. Call `open` before using `get`.'
       );
     }
+    try {
+      //console.log("GET");
+      options?.signal?.throwIfAborted();
 
-    const input = { // GetItemInput
-      TableName: this.#tableName, // required
-      Key: { // Key // required
-        "tenant": { // AttributeValue Union: only one key present
-          S: tenant,
+      const input = { // GetItemInput
+        TableName: this.#tableName, // required
+        Key: { // Key // required
+          "tenant": { // AttributeValue Union: only one key present
+            S: tenant,
+          },
+          "messageCid": {
+            S: cid
+          }
         },
-        "messageCid": {
-          S: cid
-        }
-      },
-      AttributesToGet: [ // AttributeNameList
-        "tenant", "messageCid", "encodedMessageBytes", "encodedData"
-      ]
-    };
-    const command = new GetItemCommand(input);
-    const response = await this.#client.send(command);
-    response.Item
+        AttributesToGet: [ // AttributeNameList
+          "tenant", "messageCid", "encodedMessageBytes", "encodedData"
+        ]
+      };
+      //console.log(input);
+      const command = new GetItemCommand(input);
+      const response = await this.#client.send(command);
+      response.Item
 
-    if ( !response.Item ) {
-      return undefined;
-    }
+      if ( !response.Item ) {
+        return undefined;
+      }
 
-    const result = {
-        tenant: response.Item.tenant.S?.toString(),
-        messageCid: response.Item.messageCid.S?.toString(),
-        encodedMessageBytes: response.Item.encodedMessageBytes.B,
-        encodedData: response.Item.encodedData.S?.toString()
-    };
+      const result = {
+          tenant: response.Item.tenant.S?.toString(),
+          messageCid: response.Item.messageCid.S?.toString(),
+          encodedMessageBytes: response.Item.encodedMessageBytes.B,
+          encodedData: response.Item.encodedData?.S?.toString()
+      };
 
-    return this.parseEncodedMessage(result.encodedMessageBytes ? result.encodedMessageBytes: Buffer.from(""), result.encodedData, options);
     
+      const responseData = await this.parseEncodedMessage(result.encodedMessageBytes ? result.encodedMessageBytes: Buffer.from(""), result.encodedData, options);
+      //console.log(responseData);
+      return responseData;
+    } catch ( error ) {
+      //console.log("FAILED TO GET");
+      //console.error(error);
+    }
   }
 
   async query(
@@ -318,49 +321,117 @@ export class MessageStoreNoSql implements MessageStore {
     pagination?: Pagination,
     options?: MessageStoreOptions
   ): Promise<{ messages: GenericMessage[], cursor?: PaginationCursor}> {
-    //console.log("QUERY")
-    const { property: sortProperty, direction: sortDirection } = this.extractSortProperties(messageSort);
 
-    let params: any = null;
-    if ( pagination?.cursor ) {
-      if ( messageSort ) {
-        params = this.cursorInputSort(tenant, pagination, sortProperty, sortDirection);
-      } else {
-        params = this.cursorInput(tenant, pagination)
-      }
-    } else {
-      params = {
-        TableName: this.#tableName,
-        KeyConditionExpression: '#tenant = :tenant',
-        ExpressionAttributeNames: {
-            '#tenant': "tenant" // Replace with your actual hash key attribute name
-        },
-        ExpressionAttributeValues: marshall({
-            ':tenant': tenant
-        })
-      };
-
-      if ( pagination?.limit ) {
-        params["Limit"] = pagination.limit
-      }
-      if ( pagination?.cursor ) {
-        params["ExclusiveStartKey"] = JSON.parse(pagination.cursor.messageCid)
-      }
+    if ( filters ) {
+      //console.log("FILTER FOUND");
+      //console.log(filters);
     }
 
+    if (!this.#client) {
+      throw new Error(
+        'Connection to database not open. Call `open` before using `query`.'
+      );
+    }
+
+    options?.signal?.throwIfAborted();
+
+    //console.log("QUERY")
     try {
-      //console.log("PARAMS");
-      //console.log(params);
+      const { property: sortProperty, direction: sortDirection } = this.extractSortProperties(messageSort);
+
+      let params: any = this.cursorInputSort(tenant, pagination, sortProperty, sortDirection);
+    // if ( pagination?.cursor ) {
+    //   if ( messageSort ) {
+    //     params = this.cursorInputSort(tenant, pagination, sortProperty, sortDirection);
+    //   } else {
+    //     params = this.cursorInput(tenant, pagination)
+    //   }
+    // } else {
+    //   params = {
+    //     TableName: this.#tableName,
+    //     KeyConditionExpression: '#tenant = :tenant',
+    //     ExpressionAttributeNames: {
+    //         '#tenant': "tenant" // Replace with your actual hash key attribute name
+    //     },
+    //     ExpressionAttributeValues: marshall({
+    //         ':tenant': tenant
+    //     })
+    //   };
+
+    //   if ( pagination?.limit ) {
+    //     params["Limit"] = pagination.limit
+    //   }
+    //   if ( pagination?.cursor ) {
+    //     params["ExclusiveStartKey"] = JSON.parse(pagination.cursor.messageCid)
+    //   }
+    // }
+        //console.log("PARAMS");
+        //console.log(params);
         const command = new QueryCommand(params);
         const data = await this.#client.send(command);
+        //console.log("IS LASTEVAL: " + data.LastEvaluatedKey !== undefined);
+
+        delete params["Limit"];
+        //console.log(params);
+        const command2 = new QueryCommand(params);
+    
+        const data2 = await this.#client.send(command2);
+        //console.log(data2);
+        //console.log(data2.ScannedCount);
+
+        if ( data.ScannedCount !== undefined && data.Items !== undefined && data.ScannedCount > 0 && data.LastEvaluatedKey ) {
+          let matches = true;
+          for ( const key in data.LastEvaluatedKey ){
+            if ( data.LastEvaluatedKey[key] !== data.Items[data.ScannedCount - 1].S ) {
+              matches = false;
+            }
+          }
+          if ( matches ) {
+            delete data["LastEvaluatedKey"];
+            //console.log("MATCHES, DELETE!");
+          }
+        }
+
+        //console.log(data);
 
         // Extract and return the items from the response
         if (data.Items) {
+
+          //console.log("BEFORE:");
+          //console.log(data.Items.length);
+
+          const filteredItems = data.Items.filter(item => {
+            let filterMatchCount = 0;
+            for (const filter of filters) {
+              let innerFilterMatch = true; // we'll set to false if it doesn't match
+              for ( const key in filter ){
+                //console.log(key);
+                const expectedValue = filter[key];
+                // //console.log(expectedValue);
+                // //console.log(item[key].S);
+                // Check if item attribute matches expected value
+                if (!item.hasOwnProperty(key) || item[key].S !== expectedValue) {
+                  innerFilterMatch = false; // Exclude item from filteredItems
+                }
+
+              }
+              // means all of the filter properties were met so we increment the filterMatchCount (indicating we had at least one match)
+              if ( innerFilterMatch ) {
+                filterMatchCount++;
+              }
+            }
+            return filterMatchCount > 0; // Include item in filteredItems
+          });
+
+          //console.log("AFTER:");
+          //console.log(filteredItems.length);
+
           //console.log("RAW RESULTS");
           //console.log(data);
-          const results = await this.processPaginationResults(data.Items, sortProperty, data.LastEvaluatedKey, pagination?.limit, options);
+
+          const results = await this.processPaginationResults(filteredItems, sortProperty, data.LastEvaluatedKey, pagination?.limit, options);
           //console.log("PROCESSED");
-          //console.log(results);
+          //console.log(JSON.stringify(results, null, 2));
           return results;
         } else {
           return { messages: []};
@@ -460,6 +531,8 @@ export class MessageStoreNoSql implements MessageStore {
       );
     }
 
+    options?.signal?.throwIfAborted();
+
     let deleteParams = {
       TableName: this.#tableName,
       Key: marshall({
@@ -511,7 +584,7 @@ export class MessageStoreNoSql implements MessageStore {
 
       //console.log("Successfully cleared all data from " + this.#tableName );
     } catch (err) {
-        //console.error('Unable to clear table:', err);
+        console.error('Unable to clear table:', err);
     }
   }
 
@@ -561,10 +634,15 @@ export class MessageStoreNoSql implements MessageStore {
     // we now check if the returned results are greater than the limit, if so we pluck the last item out of the result set
     // the cursor is always the last item in the *returned* result so we use the last item in the remaining result set to build a cursor
     let cursor: PaginationCursor | undefined;
-    if (limit !== undefined && results.length == limit) {
-      const lastMessage = results.at(-1);
-      const cursorValue = lastMessage[sortProperty];
-      cursor = { messageCid: lastEvaluatedKey, value: cursorValue };
+    // if (limit !== undefined && results.length == limit) {
+    //   const lastMessage = results.at(-1);
+    //   const cursorValue = lastMessage[sortProperty];
+    //   cursor = { messageCid: lastEvaluatedKey, value: cursorValue };
+    // }
+    if ( lastEvaluatedKey !== null && lastEvaluatedKey !== undefined ) {
+      cursor = { messageCid: JSON.stringify(lastEvaluatedKey), value: JSON.stringify(lastEvaluatedKey) };
+      //console.log("CURSOR EXISTS");
+      //console.log(cursor);
     }
 
     // extracts the full encoded message from the stored blob for each result item.
@@ -589,69 +667,49 @@ export class MessageStoreNoSql implements MessageStore {
     }
   }
 
-
-  /**
-   * Extracts the appropriate sort property and direction given a MessageSort object.
-   */
-  private cursorInput(
-    tenant: string,
-    pagination: Pagination
-  ): any {
-    const params: QueryCommandInput = {
-      TableName: this.#tableName,
-      KeyConditionExpression: '#tenant = :tenant',
-      ExpressionAttributeNames: {
-          '#tenant': "tenant" // Replace with your actual hash key attribute name
-      },
-      ExpressionAttributeValues: marshall({
-          ':tenant': tenant
-      })
-    };
-
-    if ( pagination?.limit ) {
-      params["Limit"] = pagination.limit
-    }
-    if ( pagination?.cursor ) {
-      params["ExclusiveStartKey"] = JSON.parse(pagination.cursor.messageCid)
-    }
-
-    //console.log(params);
-
-    return params;
-  }
-
   /**
    * Extracts the appropriate sort property and direction given a MessageSort object.
    */
   private cursorInputSort(
     tenant: string,
-    pagination: Pagination,
+    pagination: Pagination|undefined,
     sortAttribute: string,
     sortDirection: SortDirection
   ): any {
-    const direction = sortDirection == SortDirection.Ascending ? true : false;
-    const params: QueryCommandInput = {
-      TableName: this.#tableName,
-      IndexName: sortAttribute,
-      KeyConditionExpression: '#tenant = :tenant',
-      ExpressionAttributeNames: {
-          '#tenant': "tenant" // Replace with your actual hash key attribute name
-      },
-      ExpressionAttributeValues: marshall({
-          ':tenant': tenant
-      }),
-      ScanIndexForward: direction
-    };
+    try {
+      const direction = sortDirection == SortDirection.Ascending ? true : false;
+      const params: QueryCommandInput = {
+        TableName: this.#tableName,
+        KeyConditionExpression: '#tenant = :tenant',
+        ExpressionAttributeNames: {
+            '#tenant': "tenant" // Replace with your actual hash key attribute name
+        },
+        ExpressionAttributeValues: marshall({
+            ':tenant': tenant
+        }),
+        ScanIndexForward: direction,
+        
+      };
 
-    if ( pagination?.limit ) {
-      params["Limit"] = pagination.limit
+      if ( sortAttribute ) {
+        params["IndexName"] = sortAttribute
+        if ( direction ) {
+          params["ScanIndexForward"] = direction
+        }
+      }
+
+      if ( pagination?.limit ) {
+        params["Limit"] = pagination.limit
+      }
+      if ( pagination?.cursor ) {
+        params["ExclusiveStartKey"] = JSON.parse(pagination.cursor.messageCid);
+      }
+      //console.log(params);
+      return params;
+    } catch (error) {
+      //console.log("Caught error:");
+      //console.log(error);
+      throw error;
     }
-    if ( pagination?.cursor ) {
-      params["ExclusiveStartKey"] = JSON.parse(pagination.cursor.messageCid)
-    }
-
-    //console.log(params);
-
-    return params;
   }
 }
