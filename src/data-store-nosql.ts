@@ -23,13 +23,10 @@ import {
 } from '@aws-sdk/util-dynamodb'
 
 export class DataStoreNoSql implements DataStore {
-  #dialect: Dialect;
-  #db: Kysely<DwnDatabaseType> | null = null;
 
   #client: DynamoDBClient;
 
   constructor(dialect: Dialect) {
-    this.#dialect = dialect;
     this.#client = new DynamoDBClient({
       region: 'localhost',
       endpoint: 'http://0.0.0.0:8006',

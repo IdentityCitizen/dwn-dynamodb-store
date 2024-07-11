@@ -224,6 +224,7 @@ export class MessageStoreNoSql implements MessageStore {
     // In SQL this is split into an insert into a tags table and the message table.
     // Since we're working with docs here, there should be no reason why we can't
     // put it in one write.
+    //console.log("CID: " + messageCid);
     const { indexes: putIndexes, tags } = extractTagsAndSanitizeIndexes(indexes);
     const input = {
       "Item": {
@@ -255,7 +256,7 @@ export class MessageStoreNoSql implements MessageStore {
       await this.#client.send(command);
     } catch ( error ) {
       //console.log("FAILED");
-      //console.error(error);
+      console.error(error);
     }
     
   }
@@ -290,8 +291,10 @@ export class MessageStoreNoSql implements MessageStore {
       };
       //console.log(input);
       const command = new GetItemCommand(input);
-      const response = await this.#client.send(command);
-      response.Item
+      const response = await executeUnlessAborted(
+        this.#client.send(command),
+        options?.signal
+      );
 
       if ( !response.Item ) {
         return undefined;
@@ -333,6 +336,8 @@ export class MessageStoreNoSql implements MessageStore {
       );
     }
 
+    //await this.dumpAll();
+
     options?.signal?.throwIfAborted();
 
     //console.log("QUERY")
@@ -368,14 +373,25 @@ export class MessageStoreNoSql implements MessageStore {
         //console.log("PARAMS");
         //console.log(params);
         const command = new QueryCommand(params);
-        const data = await this.#client.send(command);
+        const data = await executeUnlessAborted(
+          this.#client.send(command),
+          options?.signal
+        );
+
+        //console.log("LAST: " + JSON.stringify(data.LastEvaluatedKey));
+        if( data.Items ) {
+          for( const item of data?.Items ) {
+            //console.log(item.messageCid.S );
+          }
+        }
+        
         //console.log("IS LASTEVAL: " + data.LastEvaluatedKey !== undefined);
 
         delete params["Limit"];
         //console.log(params);
-        const command2 = new QueryCommand(params);
+        //const command2 = new QueryCommand(params);
     
-        const data2 = await this.#client.send(command2);
+        //const data2 = await this.#client.send(command2);
         //console.log(data2);
         //console.log(data2.ScannedCount);
 
@@ -406,9 +422,9 @@ export class MessageStoreNoSql implements MessageStore {
               let innerFilterMatch = true; // we'll set to false if it doesn't match
               for ( const key in filter ){
                 //console.log(key);
-                const expectedValue = filter[key];
-                // //console.log(expectedValue);
-                // //console.log(item[key].S);
+                const expectedValue = filter[key].toString();
+                //console.log(expectedValue);
+                //console.log(item[key].S);
                 // Check if item attribute matches expected value
                 if (!item.hasOwnProperty(key) || item[key].S !== expectedValue) {
                   innerFilterMatch = false; // Exclude item from filteredItems
@@ -541,7 +557,10 @@ export class MessageStoreNoSql implements MessageStore {
       })
     };
     let deleteCommand = new DeleteItemCommand(deleteParams);
-    await this.#client.send(deleteCommand);
+    await executeUnlessAborted(
+      this.#client.send(deleteCommand),
+      options?.signal
+    );
   }
 
   async clear(): Promise<void> {
@@ -582,10 +601,59 @@ export class MessageStoreNoSql implements MessageStore {
 
       } while (scanResult.LastEvaluatedKey);
 
+      // Since DynamoDB is eventual consistency, wait 5 seconds between calls
+      // //console.log("Waiting 5 seconds.");
+      // await this.sleep(5000)
+      // //console.log("Finished waiting 5 seconds.");
+
       //console.log("Successfully cleared all data from " + this.#tableName );
     } catch (err) {
         console.error('Unable to clear table:', err);
     }
+  }
+
+
+  async dumpAll(): Promise<void> {
+    if (!this.#client) {
+      throw new Error(
+        'Connection to database not open. Call `open` before using `clear`.'
+      );
+    }
+
+    try {
+      let scanParams: ScanCommandInput = {
+          TableName: this.#tableName
+      };
+
+      let scanCommand = new ScanCommand(scanParams);
+      let scanResult;
+      
+      do {
+          scanResult = await this.#client.send(scanCommand);
+          //console.log("COUNT: " + scanResult.Items.length)
+          // Dump each item
+          for (let item of scanResult.Items) {
+            //console.log(item);
+          }
+
+          // Continue scanning if we have more items
+          scanParams.ExclusiveStartKey = scanResult.LastEvaluatedKey;
+
+      } while (scanResult.LastEvaluatedKey);
+
+      // Since DynamoDB is eventual consistency, wait 5 seconds between calls
+      // //console.log("Waiting 5 seconds.");
+      // await this.sleep(5000)
+      // //console.log("Finished waiting 5 seconds.");
+
+      //console.log("Successfully cleared all data from " + this.#tableName );
+    } catch (err) {
+        console.error('Unable to clear table:', err);
+    }
+  }
+
+  sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   private async parseEncodedMessage(
@@ -634,16 +702,20 @@ export class MessageStoreNoSql implements MessageStore {
     // we now check if the returned results are greater than the limit, if so we pluck the last item out of the result set
     // the cursor is always the last item in the *returned* result so we use the last item in the remaining result set to build a cursor
     let cursor: PaginationCursor | undefined;
-    // if (limit !== undefined && results.length == limit) {
-    //   const lastMessage = results.at(-1);
-    //   const cursorValue = lastMessage[sortProperty];
-    //   cursor = { messageCid: lastEvaluatedKey, value: cursorValue };
-    // }
-    if ( lastEvaluatedKey !== null && lastEvaluatedKey !== undefined ) {
-      cursor = { messageCid: JSON.stringify(lastEvaluatedKey), value: JSON.stringify(lastEvaluatedKey) };
-      //console.log("CURSOR EXISTS");
-      //console.log(cursor);
+    if (limit !== undefined && results.length > limit) {
+      results = results.slice(0, limit);
+      const lastMessage = results.at(-1);
+      const cursorValue = {};
+      cursorValue["tenant"] = lastMessage["tenant"];
+      cursorValue[sortProperty] = lastMessage[sortProperty];
+      cursorValue["messageCid"] = lastMessage["messageCid"];
+      cursor = { messageCid: JSON.stringify(cursorValue), value: JSON.stringify(cursorValue) };
     }
+    // if ( lastEvaluatedKey !== null && lastEvaluatedKey !== undefined ) {
+    //   cursor = { messageCid: JSON.stringify(lastEvaluatedKey), value: JSON.stringify(lastEvaluatedKey) };
+    //   //console.log("CURSOR EXISTS");
+    //   //console.log(cursor);
+    // }
 
     // extracts the full encoded message from the stored blob for each result item.
     const messages: Promise<GenericMessage>[] = results.map(r => this.parseEncodedMessage(new Uint8Array(r.encodedMessageBytes.B), r.encodedData?.S, options));
@@ -699,7 +771,7 @@ export class MessageStoreNoSql implements MessageStore {
       }
 
       if ( pagination?.limit ) {
-        params["Limit"] = pagination.limit
+        params["Limit"] = pagination.limit + 1
       }
       if ( pagination?.cursor ) {
         params["ExclusiveStartKey"] = JSON.parse(pagination.cursor.messageCid);

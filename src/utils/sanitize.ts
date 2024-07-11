@@ -36,7 +36,7 @@ export function sanitizeIndexes(records) {
       continue;
     }
 
-    records[key] = { "S": sanitizedValue(value) };
+    records[key] = { "S": sanitizedValue(value).toString() };
   }
 }
 
