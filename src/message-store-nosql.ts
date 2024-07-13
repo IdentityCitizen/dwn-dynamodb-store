@@ -389,11 +389,6 @@ export class MessageStoreNoSql implements MessageStore {
 
         delete params["Limit"];
         //console.log(params);
-        //const command2 = new QueryCommand(params);
-    
-        //const data2 = await this.#client.send(command2);
-        //console.log(data2);
-        //console.log(data2.ScannedCount);
 
         if ( data.ScannedCount !== undefined && data.Items !== undefined && data.ScannedCount > 0 && data.LastEvaluatedKey ) {
           let matches = true;
@@ -422,13 +417,54 @@ export class MessageStoreNoSql implements MessageStore {
               let innerFilterMatch = true; // we'll set to false if it doesn't match
               for ( const key in filter ){
                 //console.log(key);
-                const expectedValue = filter[key].toString();
-                //console.log(expectedValue);
-                //console.log(item[key].S);
-                // Check if item attribute matches expected value
-                if (!item.hasOwnProperty(key) || item[key].S !== expectedValue) {
-                  innerFilterMatch = false; // Exclude item from filteredItems
+                const value = filter[key];
+                if (typeof value === 'object') {
+                  let rangeCount = 0;
+                  let matchCount = 0;
+                  if (value["gt"]) {
+                    rangeCount++;
+                    if (item.hasOwnProperty(key) ) {
+                      if ( item[key].S + "" > value["gt"] ) {
+                        matchCount++;
+                      }
+                    }
+                  }
+                  if (value["gte"]) {
+                    rangeCount++;
+                    if (item.hasOwnProperty(key) ) {
+                      if ( item[key].S + "" >= value["gt"] ) {
+                        matchCount++;
+                      }
+                    }
+                  }
+                  if (value["lt"]) {
+                    rangeCount++;
+                    if (item.hasOwnProperty(key) ) {
+                      if ( item[key].S + "" < value["gt"] ) {
+                        matchCount++;
+                      }
+                    }
+                  }
+                  if (value["lte"]) {
+                    rangeCount++;
+                    if (item.hasOwnProperty(key) ) {
+                      if ( item[key].S + "" <= value["gt"] ) {
+                        matchCount++;
+                      }
+                    }
+                  }
+                  console.log("Range Count: " + rangeCount);
+                  console.log("Match Count: " + matchCount);
+                } else {
+                  const expectedValue = filter[key].toString();
+                  //console.log(expectedValue);
+                  //console.log(JSON.stringify(item[key]));
+                  // Check if item attribute matches expected value
+                  if (!item.hasOwnProperty(key) || item[key].S !== expectedValue) {
+                    innerFilterMatch = false; // Exclude item from filteredItems
+                  }
                 }
+                
 
               }
               // means all of the filter properties were met so we increment the filterMatchCount (indicating we had at least one match)
@@ -548,19 +584,23 @@ export class MessageStoreNoSql implements MessageStore {
     }
 
     options?.signal?.throwIfAborted();
-
-    let deleteParams = {
-      TableName: this.#tableName,
-      Key: marshall({
-          'tenant': tenant, // Adjust 'primaryKey' based on your table's partition key
-          'messageCid': cid
-      })
-    };
-    let deleteCommand = new DeleteItemCommand(deleteParams);
-    await executeUnlessAborted(
-      this.#client.send(deleteCommand),
-      options?.signal
-    );
+    try {
+      let deleteParams = {
+        TableName: this.#tableName,
+        Key: marshall({
+            'tenant': tenant, // Adjust 'primaryKey' based on your table's partition key
+            'messageCid': cid
+        })
+      };
+      //console.log(deleteParams);
+      let deleteCommand = new DeleteItemCommand(deleteParams);
+      await executeUnlessAborted(
+        this.#client.send(deleteCommand),
+        options?.signal
+      );
+    } catch ( error ) {
+      //console.log(error);
+    }
   }
 
   async clear(): Promise<void> {
