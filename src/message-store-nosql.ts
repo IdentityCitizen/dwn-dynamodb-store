@@ -101,15 +101,15 @@ export class MessageStoreNoSql implements MessageStore {
               AttributeType: "S", // required
             } as AttributeDefinition,
             { // AttributeDefinition
-              AttributeName: "dateCreated", // required
+              AttributeName: "dateCreatedSort", // required
               AttributeType: "S", // required
             } as AttributeDefinition,
             { // AttributeDefinition
-              AttributeName: "datePublished", // required
+              AttributeName: "datePublishedSort", // required
               AttributeType: "S", // required
             } as AttributeDefinition,
             { // AttributeDefinition
-              AttributeName: "messageTimestamp", // required
+              AttributeName: "messageTimestampSort", // required
               AttributeType: "S", // required
             } as AttributeDefinition
           ],
@@ -129,7 +129,7 @@ export class MessageStoreNoSql implements MessageStore {
                 IndexName: "dateCreated",
                 KeySchema: [
                     { AttributeName: "tenant", KeyType: 'HASH' } as KeySchemaElement, // GSI partition key
-                    { AttributeName: "dateCreated", KeyType: 'RANGE' } as KeySchemaElement // Optional GSI sort key
+                    { AttributeName: "dateCreatedSort", KeyType: 'RANGE' } as KeySchemaElement // Optional GSI sort key
                 ],
                 Projection: {
                     ProjectionType: 'ALL' // Adjust as needed ('ALL', 'KEYS_ONLY', 'INCLUDE')
@@ -139,7 +139,7 @@ export class MessageStoreNoSql implements MessageStore {
               IndexName: "datePublished",
               KeySchema: [
                   { AttributeName: "tenant", KeyType: 'HASH' } as KeySchemaElement, // GSI partition key
-                  { AttributeName: "datePublished", KeyType: 'RANGE' } as KeySchemaElement // Optional GSI sort key
+                  { AttributeName: "datePublishedSort", KeyType: 'RANGE' } as KeySchemaElement // Optional GSI sort key
               ],
               Projection: {
                   ProjectionType: 'ALL' // Adjust as needed ('ALL', 'KEYS_ONLY', 'INCLUDE')
@@ -149,7 +149,7 @@ export class MessageStoreNoSql implements MessageStore {
               IndexName: "messageTimestamp",
               KeySchema: [
                   { AttributeName: "tenant", KeyType: 'HASH' } as KeySchemaElement, // GSI partition key
-                  { AttributeName: "messageTimestamp", KeyType: 'RANGE' } as KeySchemaElement // Optional GSI sort key
+                  { AttributeName: "messageTimestampSort", KeyType: 'RANGE' } as KeySchemaElement // Optional GSI sort key
               ],
               Projection: {
                   ProjectionType: 'ALL' // Adjust as needed ('ALL', 'KEYS_ONLY', 'INCLUDE')
@@ -243,6 +243,19 @@ export class MessageStoreNoSql implements MessageStore {
       "TableName": this.#tableName
     };
 
+    //console.log(input);
+
+    // Adding special elements with messageCid concatenated, we use this for sorting where messageCid breaks tiebreaks
+    if ( input.Item["dateCreated"] ) {
+      input.Item["dateCreatedSort"] = { S: input.Item["dateCreated"].S + input.Item["messageCid"].S };
+    }
+    if ( input.Item["datePublished"] ) {
+      input.Item["datePublishedSort"] = { S: input.Item["datePublished"].S + input.Item["messageCid"].S };
+    }
+    if ( input.Item["messageTimestamp"] ) {
+      input.Item["messageTimestampSort"] = { S: input.Item["messageTimestamp"].S + input.Item["messageCid"].S };
+    }
+    
     if ( encodedData !== null ) {
       input.Item["encodedData"] = {
         "S": encodedData
@@ -313,7 +326,7 @@ export class MessageStoreNoSql implements MessageStore {
       return responseData;
     } catch ( error ) {
       //console.log("FAILED TO GET");
-      //console.error(error);
+      console.error(error);
     }
   }
 
@@ -324,7 +337,6 @@ export class MessageStoreNoSql implements MessageStore {
     pagination?: Pagination,
     options?: MessageStoreOptions
   ): Promise<{ messages: GenericMessage[], cursor?: PaginationCursor}> {
-
     if ( filters ) {
       //console.log("FILTER FOUND");
       //console.log(filters);
@@ -345,31 +357,6 @@ export class MessageStoreNoSql implements MessageStore {
       const { property: sortProperty, direction: sortDirection } = this.extractSortProperties(messageSort);
 
       let params: any = this.cursorInputSort(tenant, pagination, sortProperty, sortDirection);
-    // if ( pagination?.cursor ) {
-    //   if ( messageSort ) {
-    //     params = this.cursorInputSort(tenant, pagination, sortProperty, sortDirection);
-    //   } else {
-    //     params = this.cursorInput(tenant, pagination)
-    //   }
-    // } else {
-    //   params = {
-    //     TableName: this.#tableName,
-    //     KeyConditionExpression: '#tenant = :tenant',
-    //     ExpressionAttributeNames: {
-    //         '#tenant': "tenant" // Replace with your actual hash key attribute name
-    //     },
-    //     ExpressionAttributeValues: marshall({
-    //         ':tenant': tenant
-    //     })
-    //   };
-
-    //   if ( pagination?.limit ) {
-    //     params["Limit"] = pagination.limit
-    //   }
-    //   if ( pagination?.cursor ) {
-    //     params["ExclusiveStartKey"] = JSON.parse(pagination.cursor.messageCid)
-    //   }
-    // }
         //console.log("PARAMS");
         //console.log(params);
         const command = new QueryCommand(params);
@@ -408,8 +395,51 @@ export class MessageStoreNoSql implements MessageStore {
         // Extract and return the items from the response
         if (data.Items) {
 
-          //console.log("BEFORE:");
-          //console.log(data.Items.length);
+          // //console.log("BEFORE:");
+          // //console.log("Sort Prop: " + sortProperty);
+          // //console.log("Direction: " + sortDirection);
+          // //console.log(data.Items.length);
+          // for ( const item of data.Items ) {
+          //   //console.log( item[sortProperty].S + " --- " + item["messageCid"].S)
+          // }
+          // data.Items.sort( (a, b) => {
+          //   // //console.log("")
+          //   // //console.log(a[sortProperty].S + " - " + a["messageCid"].S)
+          //   // //console.log(b[sortProperty].S + " - " + b["messageCid"].S)
+          //   if ( a[sortProperty].S == b[sortProperty].S ) {
+          //     //console.log("Found a match");
+          //     if ( sortDirection == 1 ) {
+          //       if ( a["messageCid"].S + "" > b["messageCid"].S + "" ) {
+          //         return 1
+          //       }
+          //       if ( a["messageCid"].S + "" < b["messageCid"].S + "" ) {
+          //         return -1
+          //       }
+          //     } else {
+          //       if ( a["messageCid"].S + "" > b["messageCid"].S + "" ) {
+          //         return -1
+          //       }
+          //       if ( a["messageCid"].S + "" < b["messageCid"].S + "" ) {
+          //         return 1
+          //       }
+          //     }
+          //   }
+          //   return sortDirection == -1 ? 1 : -1;
+          // });
+          // data.Items.sort((a, b) => {
+          //   // Sort by Name
+          //   if (a[sortProperty].S + "" < b[sortProperty].S + "") return -1 * sortDirection; // Multiplying by orderFactor to flip order if needed
+          //   if (a[sortProperty].S + "" > b[sortProperty].S + "") return 1 * sortDirection;
+
+          //   if (a["messageCid"].S + "" < b["messageCid"].S + "") return -1 * sortDirection; // Multiplying by orderFactor to flip order if needed
+          //   if (a["messageCid"].S + "" > b["messageCid"].S + "") return 1 * sortDirection;
+        
+          //   return 0;
+          // });
+          // //console.log("AFTER:");
+          // for ( const item of data.Items ) {
+          //   //console.log( item[sortProperty].S + " --- " + item["messageCid"].S)
+          // }
 
           const filteredItems = data.Items.filter(item => {
             let filterMatchCount = 0;
@@ -424,6 +454,7 @@ export class MessageStoreNoSql implements MessageStore {
                   if (value["gt"]) {
                     rangeCount++;
                     if (item.hasOwnProperty(key) ) {
+                      //console.log("Compare: " + item[key].S + " - " + value["gt"]);
                       if ( item[key].S + "" > value["gt"] ) {
                         matchCount++;
                       }
@@ -432,7 +463,8 @@ export class MessageStoreNoSql implements MessageStore {
                   if (value["gte"]) {
                     rangeCount++;
                     if (item.hasOwnProperty(key) ) {
-                      if ( item[key].S + "" >= value["gt"] ) {
+                      //console.log("Compare: " + item[key].S + " - " + value["gte"]);
+                      if ( item[key].S + "" >= value["gte"] ) {
                         matchCount++;
                       }
                     }
@@ -440,7 +472,8 @@ export class MessageStoreNoSql implements MessageStore {
                   if (value["lt"]) {
                     rangeCount++;
                     if (item.hasOwnProperty(key) ) {
-                      if ( item[key].S + "" < value["gt"] ) {
+                      //console.log("Compare: " + item[key].S + " - " + value["lt"]);
+                      if ( item[key].S + "" < value["lt"] ) {
                         matchCount++;
                       }
                     }
@@ -448,13 +481,17 @@ export class MessageStoreNoSql implements MessageStore {
                   if (value["lte"]) {
                     rangeCount++;
                     if (item.hasOwnProperty(key) ) {
-                      if ( item[key].S + "" <= value["gt"] ) {
+                      //console.log("Compare: " + item[key].S + " - " + value["lte"]);
+                      if ( item[key].S + "" <= value["lte"] ) {
                         matchCount++;
                       }
                     }
                   }
-                  console.log("Range Count: " + rangeCount);
-                  console.log("Match Count: " + matchCount);
+                  //console.log("Range Count: " + rangeCount);
+                  //console.log("Match Count: " + matchCount);
+                  if( rangeCount > 0 && rangeCount !== matchCount ) {
+                    innerFilterMatch = false;
+                  }
                 } else {
                   const expectedValue = filter[key].toString();
                   //console.log(expectedValue);
@@ -476,10 +513,15 @@ export class MessageStoreNoSql implements MessageStore {
           });
 
           //console.log("AFTER:");
-          //console.log(filteredItems.length);
+          //console.log(filteredItems);
 
           //console.log("RAW RESULTS");
           //console.log(data);
+
+          //console.log("messageCid");
+          for ( const item of filteredItems ) {
+            //console.log(item["messageCid"].S);
+          }
 
           const results = await this.processPaginationResults(filteredItems, sortProperty, data.LastEvaluatedKey, pagination?.limit, options);
           //console.log("PROCESSED");
@@ -489,7 +531,7 @@ export class MessageStoreNoSql implements MessageStore {
           return { messages: []};
         }
     } catch (err) {
-        //console.error("Error retrieving items:", err);
+        console.error("Error retrieving items:", err);
         throw err;
     }
 
@@ -584,23 +626,21 @@ export class MessageStoreNoSql implements MessageStore {
     }
 
     options?.signal?.throwIfAborted();
-    try {
-      let deleteParams = {
-        TableName: this.#tableName,
-        Key: marshall({
-            'tenant': tenant, // Adjust 'primaryKey' based on your table's partition key
-            'messageCid': cid
-        })
-      };
-      //console.log(deleteParams);
-      let deleteCommand = new DeleteItemCommand(deleteParams);
-      await executeUnlessAborted(
-        this.#client.send(deleteCommand),
-        options?.signal
-      );
-    } catch ( error ) {
-      //console.log(error);
-    }
+
+    let deleteParams = {
+      TableName: this.#tableName,
+      Key: marshall({
+          'tenant': tenant, // Adjust 'primaryKey' based on your table's partition key
+          'messageCid': cid
+      })
+    };
+    // //console.log(deleteParams);
+    let deleteCommand = new DeleteItemCommand(deleteParams);
+    await executeUnlessAborted(
+      this.#client.send(deleteCommand),
+      options?.signal
+    );
+
   }
 
   async clear(): Promise<void> {
@@ -747,9 +787,10 @@ export class MessageStoreNoSql implements MessageStore {
       const lastMessage = results.at(-1);
       const cursorValue = {};
       cursorValue["tenant"] = lastMessage["tenant"];
-      cursorValue[sortProperty] = lastMessage[sortProperty];
+      cursorValue[sortProperty + "Sort"] = lastMessage[sortProperty + "Sort"];
       cursorValue["messageCid"] = lastMessage["messageCid"];
       cursor = { messageCid: JSON.stringify(cursorValue), value: JSON.stringify(cursorValue) };
+      //console.log(cursor);
     }
     // if ( lastEvaluatedKey !== null && lastEvaluatedKey !== undefined ) {
     //   cursor = { messageCid: JSON.stringify(lastEvaluatedKey), value: JSON.stringify(lastEvaluatedKey) };
