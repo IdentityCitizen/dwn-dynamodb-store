@@ -39,27 +39,26 @@ export class DataStoreNoSql implements DataStore {
 
   async open(): Promise<void> {
 
-    console.log("Created client");
+    //console.log("Created client");
 
     const input = { // ListTablesInput
-      Limit: Number("1"),
     };
     const command = new ListTablesCommand(input);
     const response = await this.#client.send(command);
-    console.log(response);
+    //console.log(response);
 
     // Does table already exist?
     if ( response.TableNames ) {
-      console.log("Found Table Names in response");
+      //console.log("Found Table Names in response");
 
       const tableExists = response.TableNames?.length > 0 && response.TableNames?.indexOf("dataStore") !== -1
       if ( tableExists ) {
-        console.log("TABLE ALREADY EXISTS");
+        //console.log("TABLE ALREADY EXISTS");
         return;
       }
     }
 
-    console.log("Trying to create table");
+    //console.log("Trying to create table");
 
     const createTableInput = { // CreateTableInput
       AttributeDefinitions: [ // AttributeDefinitions // required
@@ -87,21 +86,19 @@ export class DataStoreNoSql implements DataStore {
       TableClass: "STANDARD" as TableClass,
     };
 
-    console.log("Create Table command");
+    //console.log("Create Table command");
     const createTableCommand = new CreateTableCommand(createTableInput);
 
-    console.log("Send table command");
+    //console.log("Send table command");
     try {
       const createTableResponse = await this.#client.send(createTableCommand);
-      console.log(createTableResponse);
+      //console.log(createTableResponse);
     } catch ( error ) {
       console.error(error);
     }
   }
 
   async close(): Promise<void> {
-    // await this.#db?.destroy();
-    // this.#db = null;
     this.#client.destroy();
   }
 
@@ -247,7 +244,7 @@ export class DataStoreNoSql implements DataStore {
               
               let deleteCommand = new DeleteItemCommand(deleteParams);
               await this.#client.send(deleteCommand);
-              console.log("Deleted item successfully");
+              //console.log("Deleted item successfully");
           }
 
           // Continue scanning if we have more items
@@ -255,7 +252,7 @@ export class DataStoreNoSql implements DataStore {
 
       } while (scanResult.LastEvaluatedKey);
 
-      console.log(`Successfully cleared all data from "dataStore"`);
+      //console.log(`Successfully cleared all data from "dataStore"`);
     } catch (err) {
         console.error('Unable to clear table:', err);
     }

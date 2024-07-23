@@ -48,34 +48,28 @@ import Cursor from 'pg-cursor';
 
 
 export class MessageStoreNoSql implements MessageStore {
-  #dialect: Dialect;
-  #tags: TagTables;
-  #db: Kysely<DwnDatabaseType> | null = null;
   #tableName: string = "messageStoreMessages";
-  #tagTableName: string = "messageStoreRecordsTags";
   #client: DynamoDBClient;
 
   constructor(dialect: Dialect) {
-    this.#tags = new TagTables(dialect, 'messageStoreMessages');
-    this.#dialect = dialect;
-    this.#client = new DynamoDBClient({
-      region: 'localhost',
-      endpoint: 'http://0.0.0.0:8006',
-      credentials: {
-        accessKeyId: 'MockAccessKeyId',
-        secretAccessKey: 'MockSecretAccessKey'
-      },
-    });
     // this.#client = new DynamoDBClient({
-    //   region: 'us-west-2'
+    //   region: 'localhost',
+    //   endpoint: 'http://0.0.0.0:8006',
+    //   credentials: {
+    //     accessKeyId: 'MockAccessKeyId',
+    //     secretAccessKey: 'MockSecretAccessKey'
+    //   },
     // });
+    this.#client = new DynamoDBClient({
+      region: 'ap-southeast-2'
+    });
   }
 
   async open(): Promise<void> {
     //console.log("Created client");
 
     const input = { // ListTablesInput
-      Limit: Number("1"),
+      //Limit: Number("1"),
     };
     const command = new ListTablesCommand(input);
     const response = await this.#client.send(command);
@@ -84,7 +78,7 @@ export class MessageStoreNoSql implements MessageStore {
     // Does table already exist?
     if ( response.TableNames ) {
       //console.log("Found Table Names in response");
-
+      //console.log(response.TableNames);
       const tableExists = response.TableNames?.length > 0 && response.TableNames?.indexOf(this.#tableName) !== -1
       if ( tableExists ) {
         //console.log(this.#tableName + " TABLE ALREADY EXISTS");
@@ -342,6 +336,11 @@ export class MessageStoreNoSql implements MessageStore {
       //console.log(filters);
     }
 
+    if ( pagination ) {
+      //console.log("PAG FOUND");
+      //console.log(pagination);
+    }
+
     if (!this.#client) {
       throw new Error(
         'Connection to database not open. Call `open` before using `query`.'
@@ -356,7 +355,45 @@ export class MessageStoreNoSql implements MessageStore {
     try {
       const { property: sortProperty, direction: sortDirection } = this.extractSortProperties(messageSort);
 
-      let params: any = this.cursorInputSort(tenant, pagination, sortProperty, sortDirection);
+      const filterDynamoDB: any = [];
+
+      for (const filter of filters) {
+        const constructFilter = {
+          FilterExpression: "",
+          ExpressionAttributeValues: {}
+        }
+        const conditions: string[] = [];
+        for ( const key in filter ) {
+          constructFilter.FilterExpression += key;
+          const value = filter[key];
+          if (typeof value === 'object') {
+            if (value["gt"]) {
+              conditions.push(key + " > :" + key + "GT");
+              constructFilter.ExpressionAttributeValues[":" + key + "GT"] = value["gt"]
+            }
+            if (value["gte"]) {
+              conditions.push(key + " >= :" + key + "GTE");
+              constructFilter.ExpressionAttributeValues[":" + key + "GTE"] = value["gte"]
+            }
+            if (value["lt"]) {
+              conditions.push(key + " < :" + key + "LT");
+              constructFilter.ExpressionAttributeValues[":" + key + "LT"] = value["lt"]
+            }
+            if (value["lte"]) {
+              conditions.push(key + " <= :" + key + "LTE");
+              constructFilter.ExpressionAttributeValues[":" + key + "LTE"] = value["lte"]
+            }
+          } else {
+            conditions.push(key + " = :" + key + "EQ");
+            constructFilter.ExpressionAttributeValues[":" + key + "EQ"] = filter[key].toString();
+          }
+        }
+        constructFilter.FilterExpression = conditions.join(" AND ");
+        filterDynamoDB.push(constructFilter);
+      }
+      //console.log(filterDynamoDB);
+      
+        let params: any = this.cursorInputSort(tenant, pagination, sortProperty, sortDirection, filters);
         //console.log("PARAMS");
         //console.log(params);
         const command = new QueryCommand(params);
@@ -512,11 +549,13 @@ export class MessageStoreNoSql implements MessageStore {
             return filterMatchCount > 0; // Include item in filteredItems
           });
 
+          //console.log("RAW RESULTS");
+          //console.log(data.Items);
+
           //console.log("AFTER:");
           //console.log(filteredItems);
 
-          //console.log("RAW RESULTS");
-          //console.log(data);
+          
 
           //console.log("messageCid");
           for ( const item of filteredItems ) {
@@ -827,7 +866,8 @@ export class MessageStoreNoSql implements MessageStore {
     tenant: string,
     pagination: Pagination|undefined,
     sortAttribute: string,
-    sortDirection: SortDirection
+    sortDirection: SortDirection,
+    filters: Filter[]
   ): any {
     try {
       const direction = sortDirection == SortDirection.Ascending ? true : false;
@@ -852,7 +892,7 @@ export class MessageStoreNoSql implements MessageStore {
       }
 
       if ( pagination?.limit ) {
-        params["Limit"] = pagination.limit + 1
+        params["Limit"] = (pagination.limit * filters.length) + 1
       }
       if ( pagination?.cursor ) {
         params["ExclusiveStartKey"] = JSON.parse(pagination.cursor.messageCid);

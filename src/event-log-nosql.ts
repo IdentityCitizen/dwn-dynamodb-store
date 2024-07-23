@@ -7,18 +7,110 @@ import { Kysely, Transaction } from 'kysely';
 import { executeWithRetryIfDatabaseIsLocked } from './utils/transaction.js';
 import { extractTagsAndSanitizeIndexes } from './utils/sanitize.js';
 import { TagTables } from './utils/tags.js';
+import {
+  marshall
+} from '@aws-sdk/util-dynamodb'
+import { 
+  DynamoDBClient,
+  ListTablesCommand,
+  CreateTableCommand,
+  AttributeDefinition,
+  KeySchemaElement,
+  BillingMode,
+  TableClass,
+  GetItemCommand,
+  PutItemCommand,
+  ScanCommand,
+  DeleteItemCommand,
+  ScanCommandInput,
+  ScanCommandOutput,
+  GlobalSecondaryIndex,
+  BatchWriteItemCommand,
+  BatchWriteItemCommandInput,
+  UpdateItemCommand,
+  ReturnValue,
+  QueryCommandInput,
+  QueryCommand
+} from '@aws-sdk/client-dynamodb';
 
 export class EventLogNoSql implements EventLog {
-  #dialect: Dialect;
-  #db: Kysely<DwnDatabaseType> | null = null;
-  #tags: TagTables;
+  #tableName: string = "eventLog";
+  #client: DynamoDBClient;
 
   constructor(dialect: Dialect) {
-    this.#dialect = dialect;
-    this.#tags = new TagTables(dialect, 'eventLogMessages');
+    this.#client = new DynamoDBClient({
+      region: 'localhost',
+      endpoint: 'http://0.0.0.0:8006',
+      credentials: {
+        accessKeyId: 'MockAccessKeyId',
+        secretAccessKey: 'MockSecretAccessKey'
+      },
+    });
+    // this.#client = new DynamoDBClient({
+    //   region: 'ap-southeast-2'
+    // });
   }
 
   async open(): Promise<void> {
+    //console.log("Created client");
+
+    const input = { // ListTablesInput
+      //Limit: Number("1"),
+    };
+    const command = new ListTablesCommand(input);
+    const response = await this.#client.send(command);
+    //console.log(response);
+
+    // Does table already exist?
+    if ( response.TableNames ) {
+      //console.log("Found Table Names in response");
+      //console.log(response.TableNames);
+      const tableExists = response.TableNames?.length > 0 && response.TableNames?.indexOf(this.#tableName) !== -1
+      if ( tableExists ) {
+        //console.log(this.#tableName + " TABLE ALREADY EXISTS");
+      } else {
+        //console.log("Trying to create table");
+        const createTableInput = { // CreateTableInput
+          AttributeDefinitions: [ // AttributeDefinitions // required
+            { // AttributeDefinition
+              AttributeName: "tenant", // required
+              AttributeType: "S", // required
+            } as AttributeDefinition,
+            { // AttributeDefinition
+              AttributeName: "watermark", // required
+              AttributeType: "N", // required
+            } as AttributeDefinition,
+          ],
+          TableName: this.#tableName, // required
+          KeySchema: [ // KeySchema // required
+            { // KeySchemaElement
+              AttributeName: "tenant", // required
+              KeyType: "HASH", // required
+            } as KeySchemaElement,
+            { // KeySchemaElement
+              AttributeName: "watermark", // required
+              KeyType: "RANGE", // required
+            } as KeySchemaElement,
+          ],
+          BillingMode: "PAY_PER_REQUEST" as BillingMode,
+          TableClass: "STANDARD" as TableClass,
+        };
+
+        //console.log("Create Table command");
+        const createTableCommand = new CreateTableCommand(createTableInput);
+
+        //console.log("Send table command");
+        try {
+          const createTableResponse = await this.#client.send(createTableCommand);
+          //console.log(createTableResponse);
+        } catch ( error ) {
+          console.error(error);
+        }
+      }
+    }
+  }
+
+  //async open(): Promise<void> {
     // if (this.#db) {
     //   return;
     // }
@@ -75,11 +167,10 @@ export class EventLogNoSql implements EventLog {
 
     // await createTable.execute();
     // await createRecordsTagsTable.execute();
-  }
+  //}
 
   async close(): Promise<void> {
-    await this.#db?.destroy();
-    this.#db = null;
+    this.#client.destroy();
   }
 
   async append(
@@ -87,7 +178,7 @@ export class EventLogNoSql implements EventLog {
     messageCid: string,
     indexes: Record<string, string | boolean | number>
   ): Promise<void> {
-    if (!this.#db) {
+    if (!this.#client) {
       throw new Error(
         'Connection to database not open. Call `open` before using `append`.'
       );
@@ -96,8 +187,74 @@ export class EventLogNoSql implements EventLog {
     // we execute the insert in a transaction as we are making multiple inserts into multiple tables.
     // if any of these inserts would throw, the whole transaction would be rolled back.
     // otherwise it is committed.
-    const putEventOperation = this.constructPutEventOperation({ tenant, messageCid, indexes });
-    await executeWithRetryIfDatabaseIsLocked(this.#db, putEventOperation);
+    //const putEventOperation = this.constructPutEventOperation({ tenant, messageCid, indexes });
+    // Step 1: Increment the counter atomically
+    try {
+      const counterParams = {
+        TableName: this.#tableName,
+        Key: { "tenant": { S: tenant + "_counter"}, "watermark": { N: "10" } }, // Replace 'itemCounter' with your actual counter key
+        UpdateExpression: 'SET #count = if_not_exists(#count, :start) + :incr',
+        ExpressionAttributeNames: { '#count': 'count' },
+        ExpressionAttributeValues: {
+            ':incr': { N: '1' }, // Increment value
+            ':start': { N: '0' } // Initial value if 'count' does not exist
+        },
+        ReturnValues: 'UPDATED_NEW' as ReturnValue
+      };
+  
+      const updateCommand = new UpdateItemCommand(counterParams);
+      const updateResult = await this.#client.send(updateCommand);
+      const incNumber: string = updateResult.Attributes?.["count"]?.N ?? "";
+      const incrementedCounter = parseInt(incNumber, 10);
+      //console.log("Incremented Count: " + incrementedCounter);
+      const { indexes: putIndexes, tags } = extractTagsAndSanitizeIndexes(indexes);
+      const fixIndexes = this.replaceReservedWords(putIndexes);
+      const input = {
+        "Item": {
+          "tenant": {
+            "S": tenant
+          },
+          "messageCid": {
+            "S": messageCid
+          },
+          ...tags,
+          ...fixIndexes,
+          "watermark": { N: incrementedCounter.toString() }
+        },
+        "TableName": this.#tableName
+      };
+
+      
+      //console.log(input.Item.messageCid.S + " - " + input.Item.watermark.N);
+      const command = new PutItemCommand(input);
+      await this.#client.send(command);
+    } catch ( error ) {
+      console.error(error);
+    }
+  }
+
+  // To avoid adding attributes which use reserved names, add an underscore prefix to indexes
+  private replaceReservedWords(obj) {
+    if (typeof obj !== 'object' || obj === null) {
+        return obj; // Base case: return non-object values as-is
+    }
+    
+    // Initialize an empty object to store the modified properties
+    const newObj = {};
+    
+    // Iterate over each key-value pair in the object
+    for (let key in obj) {
+        if (obj.hasOwnProperty(key)) {
+            // Construct new key with prefix only for top-level keys
+            if ( key == "schema" ) {
+              newObj["xschema"] = obj[key];
+            } else {
+              newObj[key] = obj[key];
+            }
+        }
+    }
+    
+    return newObj;
   }
 
   /**
@@ -108,10 +265,13 @@ export class EventLogNoSql implements EventLog {
     messageCid: string;
     indexes: KeyValues;
   }): (tx: Transaction<DwnDatabaseType>) => Promise<void> {
+    const { tenant, messageCid, indexes } = queryOptions;
     return async (tx) => {
-
+      
     };
     // const { tenant, messageCid, indexes } = queryOptions;
+
+    
 
     // // we extract the tag indexes into their own object to be inserted separately.
     // // we also sanitize the indexes to convert any `boolean` values to `text` representations.
@@ -151,54 +311,146 @@ export class EventLogNoSql implements EventLog {
     filters: Filter[],
     cursor?: PaginationCursor
   ): Promise<{events: string[], cursor?: PaginationCursor }> {
-    // if (!this.#db) {
-    //   throw new Error(
-    //     'Connection to database not open. Call `open` before using `queryEvents`.'
-    //   );
-    // }
+    if (!this.#client) {
+      throw new Error(
+        'Connection to database not open. Call `open` before using `queryEvents`.'
+      );
+    }
 
-    // let query = this.#db
-    //   .selectFrom('eventLogMessages')
-    //   .leftJoin('eventLogRecordsTags', 'eventLogRecordsTags.eventWatermark', 'eventLogMessages.watermark')
-    //   .select('messageCid')
-    //   .distinct()
-    //   .select('watermark')
-    //   .where('tenant', '=', tenant);
+    if ( filters ) {
+      //console.log(JSON.stringify(filters, null, 2));
+    }
 
-    // if (filters.length > 0) {
-    //   // filter sanitization takes place within `filterSelectQuery`
-    //   query = filterSelectQuery(filters, query);
-    // }
+    try {
 
-    // if(cursor !== undefined) {
-    //   // eventLogMessages in the sql store uses the watermark cursor value which is a number in SQL
-    //   // if not we will return empty results
-    //   const cursorValue = cursor.value as number;
-    //   const cursorMessageCid = cursor.messageCid;
+      const filterDynamoDB: any = [];
+      const expressionAttributeValues = {};
 
-    //   query = query.where(({ eb, refTuple, tuple }) => {
-    //     // https://kysely-org.github.io/kysely-apidoc/interfaces/ExpressionBuilder.html#refTuple
-    //     return eb(refTuple('watermark', 'messageCid'), '>', tuple(cursorValue, cursorMessageCid));
-    //   });
-    // }
+      for (const filter of filters) {
+        const constructFilter = {
+          FilterExpression: "",
+        }
+        const conditions: string[] = [];
+        for ( const keyRaw in filter ) {
+          const key = keyRaw == "schema" ? "xschema" : keyRaw;
+          constructFilter.FilterExpression += key;
+          const value = filter[key];
+          if (typeof value === 'object') {
+            if (value["gt"]) {
+              conditions.push(key + " > :x" + key + "GT");
+              expressionAttributeValues[":x" + key + "GT"] = value["gt"]
+            }
+            if (value["gte"]) {
+              conditions.push(key + " >= :x" + key + "GTE");
+              expressionAttributeValues[":x" + key + "GTE"] = value["gte"]
+            }
+            if (value["lt"]) {
+              conditions.push(key + " < :x" + key + "LT");
+              expressionAttributeValues[":x" + key + "LT"] = value["lt"]
+            }
+            if (value["lte"]) {
+              conditions.push(key + " <= :x" + key + "LTE");
+              expressionAttributeValues[":x" + key + "LTE"] = value["lte"]
+            }
+          } else {
+            conditions.push(key + " = :x" + key + "EQ");
+            expressionAttributeValues[":x" + key + "EQ"] = filter[keyRaw].toString();
+          }
+        }
+        filterDynamoDB.push("(" + conditions.join(" AND ") + ")");
+      }
 
-    // query = query.orderBy('watermark', 'asc').orderBy('messageCid', 'asc');
+      expressionAttributeValues[':tenant'] = tenant;
 
-    // const events: string[] = [];
-    // // we always return a cursor with the event log query, so we set the return cursor to the properties of the last item.
-    // let returnCursor: PaginationCursor | undefined;
-    // if (this.#dialect.isStreamingSupported) {
-    //   for await (let { messageCid, watermark: value } of query.stream()) {
-    //     events.push(messageCid);
-    //     returnCursor = { messageCid, value };
-    //   }
-    // } else {
-    //   const results = await query.execute();
-    //   for (let { messageCid, watermark: value } of results) {
-    //     events.push(messageCid);
-    //     returnCursor = { messageCid, value };
-    //   }
-    // }
+      //console.log(filterDynamoDB.join(" OR "));
+      //console.log(expressionAttributeValues);
+
+      const filterExp = filterDynamoDB.join(" OR ");
+
+      const params: QueryCommandInput = {
+        TableName: this.#tableName,
+        KeyConditionExpression: '#tenant = :tenant',
+        ExpressionAttributeNames: {
+            '#tenant': "tenant" // Replace with your actual hash key attribute name
+        },
+        ExpressionAttributeValues: marshall(expressionAttributeValues),
+        ScanIndexForward: true,
+      };
+
+      if ( filterExp ) {
+        params.FilterExpression = filterExp;
+      }
+
+      //console.log(params);
+
+      const command = new QueryCommand(params);
+      const data = await this.#client.send(command);
+
+      if( data.Items ){
+        const events: string[] = [];
+        const lastMessage: any = data.Items.at(-1);
+        const cursorValue = {};
+        cursorValue["tenant"] = lastMessage["tenant"];
+        cursorValue["messageCid"] = lastMessage["messageCid"];
+        cursorValue["watermark"] = lastMessage["watermark"];
+        cursor = { messageCid: JSON.stringify(cursorValue), value: JSON.stringify(cursorValue) };
+
+        for (let { messageCid, watermark } of data.Items) {
+          //console.log(messageCid?.S + " - " + watermark?.N);
+            events.push(messageCid?.S ?? "");
+        }
+        //console.log("Returning: ");
+        //console.log(events);
+        return { events, cursor };
+      }
+        
+
+      // let query = this.#db
+      //   .selectFrom('eventLogMessages')
+      //   .leftJoin('eventLogRecordsTags', 'eventLogRecordsTags.eventWatermark', 'eventLogMessages.watermark')
+      //   .select('messageCid')
+      //   .distinct()
+      //   .select('watermark')
+      //   .where('tenant', '=', tenant);
+
+      // if (filters.length > 0) {
+      //   // filter sanitization takes place within `filterSelectQuery`
+      //   query = filterSelectQuery(filters, query);
+      // }
+
+      // if(cursor !== undefined) {
+      //   // eventLogMessages in the sql store uses the watermark cursor value which is a number in SQL
+      //   // if not we will return empty results
+      //   const cursorValue = cursor.value as number;
+      //   const cursorMessageCid = cursor.messageCid;
+
+      //   query = query.where(({ eb, refTuple, tuple }) => {
+      //     // https://kysely-org.github.io/kysely-apidoc/interfaces/ExpressionBuilder.html#refTuple
+      //     return eb(refTuple('watermark', 'messageCid'), '>', tuple(cursorValue, cursorMessageCid));
+      //   });
+      // }
+
+      // query = query.orderBy('watermark', 'asc').orderBy('messageCid', 'asc');
+
+      // const events: string[] = [];
+      // // we always return a cursor with the event log query, so we set the return cursor to the properties of the last item.
+      // let returnCursor: PaginationCursor | undefined;
+      // if (this.#dialect.isStreamingSupported) {
+      //   for await (let { messageCid, watermark: value } of query.stream()) {
+      //     events.push(messageCid);
+      //     returnCursor = { messageCid, value };
+      //   }
+      // } else {
+      //   const results = await query.execute();
+      //   for (let { messageCid, watermark: value } of results) {
+      //     events.push(messageCid);
+      //     returnCursor = { messageCid, value };
+      //   }
+      // }
+
+    } catch (error) {
+      console.error(error);
+    }
 
     // return { events, cursor: returnCursor };
     return { events: [], cursor: {messageCid: "123", value: 1} };
@@ -208,9 +460,9 @@ export class EventLogNoSql implements EventLog {
     tenant: string,
     messageCids: Array<string>
   ): Promise<void> {
-    if (!this.#db) {
+    if (!this.#client) {
       throw new Error(
-        'Connection to database not open. Call `open` before using `deleteEventsByCid`.'
+        'Connection to database not open. Call `open` before using `delete`.'
       );
     }
 
@@ -218,22 +470,93 @@ export class EventLogNoSql implements EventLog {
       return;
     }
 
-    await this.#db
-      .deleteFrom('eventLogMessages')
-      .where('tenant', '=', tenant)
-      .where('messageCid', 'in', messageCids)
-      .execute();
+    const keysToDelete: any = [
+    ];
+
+    for ( const messageCid of messageCids ) {
+      keysToDelete.push({ PrimaryKey: { tenant, messageCid } });
+    }
+
+    await this.deleteItems(keysToDelete)
+
   }
 
+  async deleteItems(keysToDelete: { [key: string]: any }[]) {
+    const client = new DynamoDBClient({ region: 'your-region' }); // Replace 'your-region' with your AWS region
+
+    // Prepare requests in batches of 25 (DynamoDB batchWriteItem limit)
+    const batchSize = 25;
+    const batches: BatchWriteItemCommandInput[] = [];
+
+    for (let i = 0; i < keysToDelete.length; i += batchSize) {
+        const batchKeys = keysToDelete.slice(i, i + batchSize);
+
+        const deleteRequests = batchKeys.map(key => ({
+            DeleteRequest: {
+                Key: key
+            }
+        }));
+
+        batches.push({
+            RequestItems: {
+                [this.#tableName]: deleteRequests
+            }
+        });
+    }
+
+    // Execute batches using batchWriteItem
+    for (const batch of batches) {
+        const command = new BatchWriteItemCommand(batch);
+        try {
+            const response = await client.send(command);
+            //console.log('Batch delete successful:', response);
+        } catch (error) {
+            console.error('Error deleting batch:', error);
+            // Handle error as needed
+        }
+    }
+}
+
   async clear(): Promise<void> {
-    if (!this.#db) {
+    if (!this.#client) {
       throw new Error(
         'Connection to database not open. Call `open` before using `clear`.'
       );
     }
 
-    await this.#db
-      .deleteFrom('eventLogMessages')
-      .execute();
+    try {
+      let scanParams: ScanCommandInput = {
+          TableName: this.#tableName
+      };
+
+      let scanCommand = new ScanCommand(scanParams);
+      let scanResult;
+      
+      do {
+          scanResult = await this.#client.send(scanCommand);
+
+          // Delete each item
+          for (let item of scanResult.Items) {
+              let deleteParams = {
+                  TableName: this.#tableName,
+                  Key: {
+                      'tenant': { S: item.tenant.S.toString() }, // Adjust 'primaryKey' based on your table's partition key
+                      'watermark': { N: item.watermark.N.toString() }
+                  }
+              };
+              let deleteCommand = new DeleteItemCommand(deleteParams);
+              await this.#client.send(deleteCommand);
+              //console.log("Deleted item successfully");
+          }
+
+          // Continue scanning if we have more items
+          scanParams.ExclusiveStartKey = scanResult.LastEvaluatedKey;
+
+      } while (scanResult.LastEvaluatedKey);
+
+      //console.log(`Successfully cleared all data from "dataStore"`);
+    } catch (err) {
+        console.error('Unable to clear table:', err);
+    }
   }
 }
