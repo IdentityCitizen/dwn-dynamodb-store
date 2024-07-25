@@ -5,7 +5,7 @@ import { Dialect } from './dialect/dialect.js';
 import { filterSelectQuery } from './utils/filter.js';
 import { Kysely, Transaction } from 'kysely';
 import { executeWithRetryIfDatabaseIsLocked } from './utils/transaction.js';
-import { extractTagsAndSanitizeIndexes } from './utils/sanitize.js';
+import { extractTagsAndSanitizeIndexes } from './utils/sanitize-events.js';
 import { TagTables } from './utils/tags.js';
 import {
   marshall
@@ -80,6 +80,10 @@ export class EventLogNoSql implements EventLog {
               AttributeName: "watermark", // required
               AttributeType: "N", // required
             } as AttributeDefinition,
+            { // AttributeDefinition
+              AttributeName: "messageCid", // required
+              AttributeType: "S", // required
+            } as AttributeDefinition,
           ],
           TableName: this.#tableName, // required
           KeySchema: [ // KeySchema // required
@@ -88,9 +92,21 @@ export class EventLogNoSql implements EventLog {
               KeyType: "HASH", // required
             } as KeySchemaElement,
             { // KeySchemaElement
-              AttributeName: "watermark", // required
+              AttributeName: "messageCid", // required
               KeyType: "RANGE", // required
             } as KeySchemaElement,
+          ],
+          GlobalSecondaryIndexes: [
+            {
+                IndexName: "watermark",
+                KeySchema: [
+                    { AttributeName: "tenant", KeyType: 'HASH' } as KeySchemaElement, // GSI partition key
+                    { AttributeName: "watermark", KeyType: 'RANGE' } as KeySchemaElement // Optional GSI sort key
+                ],
+                Projection: {
+                    ProjectionType: 'ALL' // Adjust as needed ('ALL', 'KEYS_ONLY', 'INCLUDE')
+                }
+            } as GlobalSecondaryIndex
           ],
           BillingMode: "PAY_PER_REQUEST" as BillingMode,
           TableClass: "STANDARD" as TableClass,
@@ -192,7 +208,7 @@ export class EventLogNoSql implements EventLog {
     try {
       const counterParams = {
         TableName: this.#tableName,
-        Key: { "tenant": { S: tenant + "_counter"}, "watermark": { N: "10" } }, // Replace 'itemCounter' with your actual counter key
+        Key: { "tenant": { S: tenant + "_counter"}, "messageCid": { S: "counter" } }, // Replace 'itemCounter' with your actual counter key
         UpdateExpression: 'SET #count = if_not_exists(#count, :start) + :incr',
         ExpressionAttributeNames: { '#count': 'count' },
         ExpressionAttributeValues: {
@@ -208,6 +224,7 @@ export class EventLogNoSql implements EventLog {
       const incrementedCounter = parseInt(incNumber, 10);
       //console.log("Incremented Count: " + incrementedCounter);
       const { indexes: putIndexes, tags } = extractTagsAndSanitizeIndexes(indexes);
+      //console.log(putIndexes);
       const fixIndexes = this.replaceReservedWords(putIndexes);
       const input = {
         "Item": {
@@ -217,13 +234,14 @@ export class EventLogNoSql implements EventLog {
           "messageCid": {
             "S": messageCid
           },
-          ...tags,
-          ...fixIndexes,
+          ...marshall(tags),
+          ...marshall(fixIndexes),
           "watermark": { N: incrementedCounter.toString() }
         },
         "TableName": this.#tableName
       };
 
+      //console.log(input);
       
       //console.log(input.Item.messageCid.S + " - " + input.Item.watermark.N);
       const command = new PutItemCommand(input);
@@ -248,6 +266,8 @@ export class EventLogNoSql implements EventLog {
             // Construct new key with prefix only for top-level keys
             if ( key == "schema" ) {
               newObj["xschema"] = obj[key];
+            } else if ( key == "method" ) {
+              newObj["xmethod"] = obj[key];
             } else {
               newObj[key] = obj[key];
             }
@@ -321,6 +341,10 @@ export class EventLogNoSql implements EventLog {
       //console.log(JSON.stringify(filters, null, 2));
     }
 
+    if ( cursor ) {
+      //console.log(JSON.stringify(cursor, null, 2));
+    }
+
     try {
 
       const filterDynamoDB: any = [];
@@ -332,7 +356,8 @@ export class EventLogNoSql implements EventLog {
         }
         const conditions: string[] = [];
         for ( const keyRaw in filter ) {
-          const key = keyRaw == "schema" ? "xschema" : keyRaw;
+          // schema and method are reserved keywords so we replace them here
+          const key = keyRaw == "schema" ? "xschema" : keyRaw == "method" ? "xmethod" : keyRaw;
           constructFilter.FilterExpression += key;
           const value = filter[key];
           if (typeof value === 'object') {
@@ -369,6 +394,7 @@ export class EventLogNoSql implements EventLog {
 
       const params: QueryCommandInput = {
         TableName: this.#tableName,
+        IndexName: "watermark",
         KeyConditionExpression: '#tenant = :tenant',
         ExpressionAttributeNames: {
             '#tenant': "tenant" // Replace with your actual hash key attribute name
@@ -381,6 +407,10 @@ export class EventLogNoSql implements EventLog {
         params.FilterExpression = filterExp;
       }
 
+      if ( cursor ) {
+        params["ExclusiveStartKey"] = JSON.parse(cursor.messageCid);
+      }
+
       //console.log(params);
 
       const command = new QueryCommand(params);
@@ -390,10 +420,13 @@ export class EventLogNoSql implements EventLog {
         const events: string[] = [];
         const lastMessage: any = data.Items.at(-1);
         const cursorValue = {};
-        cursorValue["tenant"] = lastMessage["tenant"];
-        cursorValue["messageCid"] = lastMessage["messageCid"];
-        cursorValue["watermark"] = lastMessage["watermark"];
-        cursor = { messageCid: JSON.stringify(cursorValue), value: JSON.stringify(cursorValue) };
+        if ( lastMessage !== undefined ) {
+          cursorValue["tenant"] = lastMessage["tenant"];
+          cursorValue["messageCid"] = lastMessage["messageCid"];
+          cursorValue["watermark"] = lastMessage["watermark"];
+          cursor = { messageCid: JSON.stringify(cursorValue), value: JSON.stringify(cursorValue) };
+        }
+        
 
         for (let { messageCid, watermark } of data.Items) {
           //console.log(messageCid?.S + " - " + watermark?.N);
@@ -474,7 +507,7 @@ export class EventLogNoSql implements EventLog {
     ];
 
     for ( const messageCid of messageCids ) {
-      keysToDelete.push({ PrimaryKey: { tenant, messageCid } });
+      keysToDelete.push( { "tenant": { S: tenant}, "messageCid": { S: messageCid} } );
     }
 
     await this.deleteItems(keysToDelete)
@@ -482,7 +515,6 @@ export class EventLogNoSql implements EventLog {
   }
 
   async deleteItems(keysToDelete: { [key: string]: any }[]) {
-    const client = new DynamoDBClient({ region: 'your-region' }); // Replace 'your-region' with your AWS region
 
     // Prepare requests in batches of 25 (DynamoDB batchWriteItem limit)
     const batchSize = 25;
@@ -502,18 +534,21 @@ export class EventLogNoSql implements EventLog {
                 [this.#tableName]: deleteRequests
             }
         });
+        //console.log(JSON.stringify(batches));
     }
 
     // Execute batches using batchWriteItem
     for (const batch of batches) {
-        const command = new BatchWriteItemCommand(batch);
-        try {
-            const response = await client.send(command);
-            //console.log('Batch delete successful:', response);
-        } catch (error) {
-            console.error('Error deleting batch:', error);
-            // Handle error as needed
-        }
+      //console.log(JSON.stringify(batch));
+      const command = new BatchWriteItemCommand(batch);
+      try {
+        
+          const response = await this.#client.send(command);
+          //console.log('Batch delete successful:', response);
+      } catch (error) {
+          console.error('Error deleting batch:', error);
+          // Handle error as needed
+      }
     }
 }
 
@@ -541,9 +576,10 @@ export class EventLogNoSql implements EventLog {
                   TableName: this.#tableName,
                   Key: {
                       'tenant': { S: item.tenant.S.toString() }, // Adjust 'primaryKey' based on your table's partition key
-                      'watermark': { N: item.watermark.N.toString() }
+                      'messageCid': { S: item.messageCid.S.toString() }
                   }
               };
+              //console.log(deleteParams);
               let deleteCommand = new DeleteItemCommand(deleteParams);
               await this.#client.send(deleteCommand);
               //console.log("Deleted item successfully");

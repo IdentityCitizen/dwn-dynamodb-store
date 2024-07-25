@@ -52,17 +52,17 @@ export class MessageStoreNoSql implements MessageStore {
   #client: DynamoDBClient;
 
   constructor(dialect: Dialect) {
-    // this.#client = new DynamoDBClient({
-    //   region: 'localhost',
-    //   endpoint: 'http://0.0.0.0:8006',
-    //   credentials: {
-    //     accessKeyId: 'MockAccessKeyId',
-    //     secretAccessKey: 'MockSecretAccessKey'
-    //   },
-    // });
     this.#client = new DynamoDBClient({
-      region: 'ap-southeast-2'
+      region: 'localhost',
+      endpoint: 'http://0.0.0.0:8006',
+      credentials: {
+        accessKeyId: 'MockAccessKeyId',
+        secretAccessKey: 'MockSecretAccessKey'
+      },
     });
+    // this.#client = new DynamoDBClient({
+    //   region: 'ap-southeast-2'
+    // });
   }
 
   async open(): Promise<void> {

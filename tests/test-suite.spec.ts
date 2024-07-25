@@ -23,8 +23,8 @@ describe('NoSQL Store Test Suite', () => {
   // });
   describe('DynamoDB Support', () => {
     TestSuite.runStoreDependentTests({
-      //messageStore       : new MessageStoreNoSql(testDynamoDBDialect),
-      //dataStore          : new DataStoreNoSql(testDynamoDBDialect)
+      messageStore       : new MessageStoreNoSql(testDynamoDBDialect),
+      dataStore          : new DataStoreNoSql(testDynamoDBDialect),
       eventLog           : new EventLogNoSql(testDynamoDBDialect),
     });
   });
