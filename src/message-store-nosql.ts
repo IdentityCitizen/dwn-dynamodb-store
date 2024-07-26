@@ -483,6 +483,7 @@ export class MessageStoreNoSql implements MessageStore {
             for (const filter of filters) {
               let innerFilterMatch = true; // we'll set to false if it doesn't match
               for ( const key in filter ){
+                //console.log("Key:")
                 //console.log(key);
                 const value = filter[key];
                 if (typeof value === 'object') {
@@ -531,7 +532,9 @@ export class MessageStoreNoSql implements MessageStore {
                   }
                 } else {
                   const expectedValue = filter[key].toString();
+                  //console.log("Expected:")
                   //console.log(expectedValue);
+                  //console.log("Current:")
                   //console.log(JSON.stringify(item[key]));
                   // Check if item attribute matches expected value
                   if (!item.hasOwnProperty(key) || item[key].S !== expectedValue) {

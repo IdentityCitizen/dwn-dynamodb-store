@@ -17,7 +17,7 @@ export function extractTagsAndSanitizeIndexes(records: KeyValues): {
     if (key.startsWith('tag.')) {
       let value = indexes[key];
       delete indexes[key];
-      tags[key.slice(4)] = value;
+      tags[key] = value;
     }
   }
 
