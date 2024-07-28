@@ -397,7 +397,7 @@ export class EventLogNoSql implements EventLog {
         IndexName: "watermark",
         KeyConditionExpression: '#tenant = :tenant',
         ExpressionAttributeNames: {
-            '#tenant': "tenant" // Replace with your actual hash key attribute name
+            '#tenant': "tenant"
         },
         ExpressionAttributeValues: marshall(expressionAttributeValues),
         ScanIndexForward: true,

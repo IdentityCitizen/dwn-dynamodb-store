@@ -25,6 +25,7 @@ import {
 export class DataStoreNoSql implements DataStore {
 
   #client: DynamoDBClient;
+  #tableName: "dataStore";
 
   constructor(dialect: Dialect) {
     this.#client = new DynamoDBClient({
@@ -51,7 +52,7 @@ export class DataStoreNoSql implements DataStore {
     if ( response.TableNames ) {
       //console.log("Found Table Names in response");
 
-      const tableExists = response.TableNames?.length > 0 && response.TableNames?.indexOf("dataStore") !== -1
+      const tableExists = response.TableNames?.length > 0 && response.TableNames?.indexOf(this.#tableName) !== -1
       if ( tableExists ) {
         //console.log("TABLE ALREADY EXISTS");
         return;
@@ -71,7 +72,7 @@ export class DataStoreNoSql implements DataStore {
           AttributeType: "S", // required
         } as AttributeDefinition
       ],
-      TableName: "dataStore", // required
+      TableName: this.#tableName, // required
       KeySchema: [ // KeySchema // required
         { // KeySchemaElement
           AttributeName: "tenant", // required
@@ -114,7 +115,7 @@ export class DataStoreNoSql implements DataStore {
     }
 
     const input = { // GetItemInput
-      TableName: "dataStore", // required
+      TableName: this.#tableName, // required
       Key: { // Key // required
         "tenant": { // AttributeValue Union: only one key present
           S: tenant,
@@ -181,7 +182,7 @@ export class DataStoreNoSql implements DataStore {
           "B": data
         }
       },
-      "TableName": "dataStore"
+      "TableName": this.#tableName
     };
     const command = new PutItemCommand(input);
     await this.#client.send(command);
@@ -203,7 +204,7 @@ export class DataStoreNoSql implements DataStore {
     }
 
     let deleteParams = {
-      TableName: "dataStore",
+      TableName: this.#tableName,
       Key: marshall({
           'tenant': tenant, // Adjust 'primaryKey' based on your table's partition key
           'recordIdDataCid': recordId + "|" + dataCid
@@ -223,7 +224,7 @@ export class DataStoreNoSql implements DataStore {
 
     try {
       let scanParams: ScanCommandInput = {
-          TableName: "dataStore"
+          TableName: this.#tableName
       };
 
       let scanCommand = new ScanCommand(scanParams);
@@ -235,7 +236,7 @@ export class DataStoreNoSql implements DataStore {
           // Delete each item
           for (let item of scanResult.Items) {
               let deleteParams = {
-                  TableName: "dataStore",
+                  TableName: this.#tableName,
                   Key: marshall({
                       'tenant': item.tenant.S.toString(), // Adjust 'primaryKey' based on your table's partition key
                       'recordIdDataCid': item.recordIdDataCid.S.toString()
@@ -252,7 +253,7 @@ export class DataStoreNoSql implements DataStore {
 
       } while (scanResult.LastEvaluatedKey);
 
-      //console.log(`Successfully cleared all data from "dataStore"`);
+      //console.log(`Successfully cleared all data from this.#tableName`);
     } catch (err) {
         console.error('Unable to clear table:', err);
     }
