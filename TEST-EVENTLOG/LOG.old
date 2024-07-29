@@ -1,5 +1,5 @@
-2024/07/28-20:44:40.725 aa88 Recovering log #3369
-2024/07/28-20:44:40.728 aa88 Level-0 table #3372: started
-2024/07/28-20:44:40.744 aa88 Level-0 table #3372: 335554 bytes OK
-2024/07/28-20:44:40.752 aa88 Delete type=0 #3369
-2024/07/28-20:44:40.752 aa88 Delete type=3 #3367
+2024/07/29-21:51:39.078 4a8c Recovering log #3603
+2024/07/29-21:51:39.079 4a8c Level-0 table #3605: started
+2024/07/29-21:51:39.089 4a8c Level-0 table #3605: 25037 bytes OK
+2024/07/29-21:51:39.107 4a8c Delete type=0 #3603
+2024/07/29-21:51:39.107 4a8c Delete type=3 #3601
