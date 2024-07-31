@@ -1,7 +1,5 @@
 import { DwnDatabaseType } from './types.js';
 import { Dialect } from './dialect/dialect.js';
-import { executeWithRetryIfDatabaseIsLocked } from './utils/transaction.js';
-import { Kysely } from 'kysely';
 import { 
   DynamoDBClient,
   ListTablesCommand,
@@ -15,7 +13,6 @@ import {
   ScanCommand,
   DeleteItemCommand,
   ScanCommandInput,
-  ScanCommandOutput,
   QueryCommandInput,
   GlobalSecondaryIndex,
   QueryCommand
@@ -32,38 +29,43 @@ export class ResumableTaskStoreNoSql implements ResumableTaskStore {
 
   #client: DynamoDBClient;
   
-
   constructor(dialect: Dialect) {
-    this.#client = new DynamoDBClient({
-      region: 'localhost',
-      endpoint: 'http://0.0.0.0:8006',
-      credentials: {
-        accessKeyId: 'MockAccessKeyId',
-        secretAccessKey: 'MockSecretAccessKey'
-      },
-    });
+    if ( process.env.IS_OFFLINE ) {
+      this.#client = new DynamoDBClient({
+        region: 'localhost',
+        endpoint: 'http://0.0.0.0:8006',
+        credentials: {
+          accessKeyId: 'MockAccessKeyId',
+          secretAccessKey: 'MockSecretAccessKey'
+        },
+      });
+    } else {
+       this.#client = new DynamoDBClient({
+        region: 'ap-southeast-2'
+      });
+    }
   }
 
   async open(): Promise<void> {
-    console.log("Start open");
+    //console.log("Start open");
     const input = { // ListTablesInput
     };
     const command = new ListTablesCommand(input);
     const response = await this.#client.send(command);
-    console.log(response);
+    //console.log(response);
 
     // Does table already exist?
     if ( response.TableNames ) {
-      console.log("Found Table Names in response");
+      //console.log("Found Table Names in response");
 
       const tableExists = response.TableNames?.length > 0 && response.TableNames?.indexOf(this.#tableName) !== -1
       if ( tableExists ) {
-        console.log("TABLE ALREADY EXISTS");
+        //console.log("TABLE ALREADY EXISTS");
         return;
       }
     }
 
-    console.log("Trying to create table");
+    //console.log("Trying to create table");
 
     const createTableInput = { // CreateTableInput
       AttributeDefinitions: [ // AttributeDefinitions // required
@@ -102,15 +104,15 @@ export class ResumableTaskStoreNoSql implements ResumableTaskStore {
       BillingMode: "PAY_PER_REQUEST" as BillingMode,
       TableClass: "STANDARD" as TableClass,
     };
-    console.log(createTableInput);
+    //console.log(createTableInput);
 
-    console.log("Create Table command");
+    //console.log("Create Table command");
     const createTableCommand = new CreateTableCommand(createTableInput);
 
-    console.log("Send table command");
+    //console.log("Send table command");
     try {
       const createTableResponse = await this.#client.send(createTableCommand);
-      console.log(createTableResponse);
+      //console.log(createTableResponse);
     } catch ( error ) {
       console.error(error);
     }
@@ -139,12 +141,12 @@ export class ResumableTaskStoreNoSql implements ResumableTaskStore {
   }
 
   async close(): Promise<void> {
-    console.log("Start close");
+    //console.log("Start close");
     this.#client.destroy();
   }
 
   async register(task: any, timeoutInSeconds: number): Promise<ManagedResumableTask> {
-    console.log("Start register");
+    //console.log("Start register");
     if (!this.#client) {
       throw new Error('Connection to database not open. Call `open` before using `register`.');
     }
@@ -175,20 +177,9 @@ export class ResumableTaskStoreNoSql implements ResumableTaskStore {
       },
       "TableName": this.#tableName
     };
-    console.log(input);
+    //console.log(input);
     const command = new PutItemCommand(input);
     await this.#client.send(command);
-
-    // if (!this.#db) {
-    //   throw new Error('Connection to database not open. Call `open` before using `register`.');
-    // }
-
-    // const id = await Cid.computeCid(task);
-    // const timeout = Date.now() + timeoutInSeconds * 1000;
-    // const taskString = JSON.stringify(task);
-    // const retryCount = 0;
-    // const taskEntryInDatabase: ManagedResumableTask = { id, task: taskString, timeout, retryCount };
-    // await this.#db.insertInto('resumableTasks').values(taskEntryInDatabase).execute();
 
     return {
       id,
@@ -199,7 +190,7 @@ export class ResumableTaskStoreNoSql implements ResumableTaskStore {
   }
 
   async grab(count: number): Promise<ManagedResumableTask[]> {
-    console.log("Start grab");
+    //console.log("Start grab");
     if (!this.#client) {
       throw new Error('Connection to database not open. Call `open` before using `grab`.');
     }
@@ -223,17 +214,17 @@ export class ResumableTaskStoreNoSql implements ResumableTaskStore {
         ScanIndexForward: true,
         Limit: count
       };
-      console.log("Grab Input");
-      console.log(params);
+      //console.log("Grab Input");
+      //console.log(params);
 
       const command = new QueryCommand(params);
       const data = await this.#client.send(command);
-      console.log(data);
+      //console.log(data);
 
       if ( data.Items ) {
         for (let item of data.Items) {
           if ( item.taskid.S !== undefined ) { // will always be valued as it's an index
-            console.log("Attempting delete of " + item.taskid.S);
+            //console.log("Attempting delete of " + item.taskid.S);
             await this.delete(item.taskid.S);
             // recreate object with updated value
             const input = {
@@ -250,42 +241,14 @@ export class ResumableTaskStoreNoSql implements ResumableTaskStore {
               },
               "TableName": this.#tableName
             };
-            console.log("Recreate");
-            console.log(input);
+            //console.log("Recreate");
+            //console.log(input);
             const command = new PutItemCommand(input);
             await this.#client.send(command);
           }
         }
       }
 
-      // const operation = async (transaction) => {
-      //   tasks = await transaction
-      //     .selectFrom('resumableTasks')
-      //     .selectAll()
-      //     .where('timeout', '<=', now)
-      //     .limit(count)
-      //     .execute();
-
-      //   if (tasks.length > 0) {
-      //     const ids = tasks.map((task) => task.id);
-      //     await transaction
-      //       .updateTable('resumableTasks')
-      //       .set({ timeout: newTimeout })
-      //       .where((eb) => eb('id', 'in', ids))
-      //       .execute();
-      //   }
-      // };
-
-      // await executeWithRetryIfDatabaseIsLocked(this.#db, operation);
-
-      // const tasksToReturn = tasks.map((task) => {
-      //   return {
-      //     id         : task.id,
-      //     task       : JSON.parse(task.task),
-      //     retryCount : task.retryCount,
-      //     timeout    : task.timeout,
-      //   };
-      // });
       const tasksToReturn = data.Items?.map((task) => {
         return {
           id         : task.taskid.S ?? "",
@@ -294,10 +257,10 @@ export class ResumableTaskStoreNoSql implements ResumableTaskStore {
           timeout    : newTimeout,
         };
       });
-      console.log(tasksToReturn);
+      //console.log(tasksToReturn);
       let tasks: DwnDatabaseType['resumableTasks'][] = tasksToReturn ?? [];
-      console.log("Populating");
-      console.log(JSON.stringify(tasksToReturn, null, 2));
+      //console.log("Populating");
+      //console.log(JSON.stringify(tasksToReturn, null, 2));
       return tasks;
     } catch ( error ) {
       console.error(error);
@@ -307,7 +270,7 @@ export class ResumableTaskStoreNoSql implements ResumableTaskStore {
   }
 
   async read(taskId: string): Promise<ManagedResumableTask | undefined> {
-    console.log("Start read");
+    //console.log("Start read");
     if (!this.#client) {
       throw new Error('Connection to database not open. Call `open` before using `read`.');
     }
@@ -323,88 +286,79 @@ export class ResumableTaskStoreNoSql implements ResumableTaskStore {
         "taskid", "task", "timeout", "retryCount"
       ]
     };
-    console.log(input);
+    //console.log(input);
     const command = new GetItemCommand(input);
     const response = await this.#client.send(command);
 
     if ( !response.Item ) {
       return undefined;
     }
-    console.log("Read Response:");
-    console.log(response.Item);
+    //console.log("Read Response:");
+    //console.log(response.Item);
     return {
         id: response.Item.taskid.S ?? "",
         task: response.Item.task.S ?? "",
         timeout: parseInt(response.Item.timeout.N ?? "0"),
         retryCount: parseInt(response.Item.retryCount.N ?? "0")
     }
-
-    // return this.#db
-    //   .selectFrom('resumableTasks')
-    //   .selectAll()
-    //   .where('id', '=', taskId)
-    //   .executeTakeFirst();
   }
 
   async extend(taskId: string, timeoutInSeconds: number): Promise<void> {
-    console.log("Start extend");
-    if (!this.#client) {
-      throw new Error('Connection to database not open. Call `open` before using `extend`.');
-    }
-
-    const timeout = Date.now() + (timeoutInSeconds * 1000);
-
-    const input = { // GetItemInput
-      TableName: this.#tableName, // required
-      Key: { // Key // required
-        "taskid": { // AttributeValue Union: only one key present
-          S: taskId,
-        }
+    try {
+      //console.log("Start extend");
+      if (!this.#client) {
+        throw new Error('Connection to database not open. Call `open` before using `extend`.');
       }
-    };
-    console.log("Extend Input Task:");
-    console.log(input);
-    const command = new GetItemCommand(input);
-    const response = await this.#client.send(command);
 
-    if ( !response.Item ) {
-      return;
-    }
+      const timeout = Date.now() + (timeoutInSeconds * 1000);
 
-    response.Item.timeout = {
-      N: timeout.toString()
-    }
+      const input = { // GetItemInput
+        TableName: this.#tableName, // required
+        Key: { // Key // required
+          "taskid": { // AttributeValue Union: only one key present
+            S: taskId,
+          }
+        }
+      };
+      //console.log("Extend Input Task:");
+      //console.log(input);
+      const command = new GetItemCommand(input);
+      const response = await this.#client.send(command);
 
-    const inputRecreate = {
-      "Item": {
-        "taskid": response.Item.taskid,
-        "tenantid": {
-          "S": this.#tenantid
+      if ( !response.Item ) {
+        return;
+      }
+
+      response.Item.timeout = {
+        N: timeout.toString()
+      }
+
+      const inputRecreate = {
+        "Item": {
+          "taskid": response.Item.taskid,
+          "tenantid": {
+            "S": this.#tenantid
+          },
+          "timeout": {
+            N: timeout.toString()
+          },
+          "task": response.Item.task,
+          "retryCount": response.Item.retryCount
         },
-        "timeout": {
-          N: timeout.toString()
-        },
-        "task": response.Item.task,
-        "retryCount": response.Item.retryCount
-      },
-      "TableName": this.#tableName
-    };
-    console.log("Extend Input");
-    console.log(inputRecreate);
-    const commandInput = new PutItemCommand(inputRecreate);
-    await this.#client.send(command);
-
-
-
-    // await this.#db
-    //   .updateTable('resumableTasks')
-    //   .set({ timeout })
-    //   .where('id', '=', taskId)
-    //   .execute();
+        "TableName": this.#tableName
+      };
+      //console.log("Extend Input");
+      //console.log(inputRecreate);
+      const commandInput = new PutItemCommand(inputRecreate);
+      await this.#client.send(commandInput);
+      //console.log("Completed extension");
+    } catch ( error ) {
+      //console.log(error);
+    }
   }
 
   async delete(taskId: string): Promise<void> {
-    console.log("Start delete");
+    //console.log("Start delete");
     if (!this.#client) {
       throw new Error('Connection to database not open. Call `open` before using `delete`.');
     }
@@ -418,15 +372,10 @@ export class ResumableTaskStoreNoSql implements ResumableTaskStore {
     
     let deleteCommand = new DeleteItemCommand(deleteParams);
     await this.#client.send(deleteCommand);
-
-    // await this.#db
-    //   .deleteFrom('resumableTasks')
-    //   .where('id', '=', taskId)
-    //   .execute();
   }
 
   async clear(): Promise<void> {
-    console.log("Start clear");
+    //console.log("Start clear");
     if (!this.#client) {
       throw new Error('Connection to database not open. Call `open` before using `clear`.');
     }
@@ -453,7 +402,7 @@ export class ResumableTaskStoreNoSql implements ResumableTaskStore {
               
               let deleteCommand = new DeleteItemCommand(deleteParams);
               await this.#client.send(deleteCommand);
-              console.log("Deleted item successfully");
+              //console.log("Deleted item successfully");
           }
 
           // Continue scanning if we have more items
@@ -461,7 +410,7 @@ export class ResumableTaskStoreNoSql implements ResumableTaskStore {
 
       } while (scanResult.LastEvaluatedKey);
 
-      console.log(`Successfully cleared all data from this.#tableName`);
+      //console.log(`Successfully cleared all data from this.#tableName`);
     } catch (err) {
         console.error('Unable to clear table:', err);
     }

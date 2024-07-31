@@ -1,12 +1,6 @@
-import type { DwnDatabaseType, KeyValues } from './types.js';
 import type { EventLog, Filter, PaginationCursor } from '@tbd54566975/dwn-sdk-js';
-
 import { Dialect } from './dialect/dialect.js';
-import { filterSelectQuery } from './utils/filter.js';
-import { Kysely, Transaction } from 'kysely';
-import { executeWithRetryIfDatabaseIsLocked } from './utils/transaction.js';
 import { extractTagsAndSanitizeIndexes } from './utils/sanitize-events.js';
-import { TagTables } from './utils/tags.js';
 import {
   marshall
 } from '@aws-sdk/util-dynamodb'
@@ -18,12 +12,10 @@ import {
   KeySchemaElement,
   BillingMode,
   TableClass,
-  GetItemCommand,
   PutItemCommand,
   ScanCommand,
   DeleteItemCommand,
   ScanCommandInput,
-  ScanCommandOutput,
   GlobalSecondaryIndex,
   BatchWriteItemCommand,
   BatchWriteItemCommandInput,
@@ -38,17 +30,20 @@ export class EventLogNoSql implements EventLog {
   #client: DynamoDBClient;
 
   constructor(dialect: Dialect) {
-    this.#client = new DynamoDBClient({
-      region: 'localhost',
-      endpoint: 'http://0.0.0.0:8006',
-      credentials: {
-        accessKeyId: 'MockAccessKeyId',
-        secretAccessKey: 'MockSecretAccessKey'
-      },
-    });
-    // this.#client = new DynamoDBClient({
-    //   region: 'ap-southeast-2'
-    // });
+    if ( process.env.IS_OFFLINE ) {
+      this.#client = new DynamoDBClient({
+        region: 'localhost',
+        endpoint: 'http://0.0.0.0:8006',
+        credentials: {
+          accessKeyId: 'MockAccessKeyId',
+          secretAccessKey: 'MockSecretAccessKey'
+        },
+      });
+    } else {
+       this.#client = new DynamoDBClient({
+        region: 'ap-southeast-2'
+      });
+    }
   }
 
   async open(): Promise<void> {
@@ -125,65 +120,6 @@ export class EventLogNoSql implements EventLog {
       }
     }
   }
-
-  //async open(): Promise<void> {
-    // if (this.#db) {
-    //   return;
-    // }
-
-    // this.#db = new Kysely<DwnDatabaseType>({ dialect: this.#dialect });
-    // let createTable = this.#db.schema
-    //   .createTable('eventLogMessages')
-    //   .ifNotExists()
-    //   .addColumn('tenant', 'text', (col) => col.notNull())
-    //   .addColumn('messageCid', 'varchar(60)', (col) => col.notNull())
-    //   // "indexes" start
-    //   .addColumn('interface', 'text')
-    //   .addColumn('method', 'text')
-    //   .addColumn('schema', 'text')
-    //   .addColumn('dataCid', 'text')
-    //   .addColumn('dataSize', 'integer')
-    //   .addColumn('dateCreated', 'text')
-    //   .addColumn('delegated', 'text')
-    //   .addColumn('messageTimestamp', 'text')
-    //   .addColumn('dataFormat', 'text')
-    //   .addColumn('isLatestBaseState', 'text')
-    //   .addColumn('published', 'text')
-    //   .addColumn('author', 'text')
-    //   .addColumn('recordId', 'text')
-    //   .addColumn('entryId', 'text')
-    //   .addColumn('datePublished', 'text')
-    //   .addColumn('latest', 'text')
-    //   .addColumn('protocol', 'text')
-    //   .addColumn('dateExpires', 'text')
-    //   .addColumn('description', 'text')
-    //   .addColumn('grantedTo', 'text')
-    //   .addColumn('grantedBy', 'text')
-    //   .addColumn('grantedFor', 'text')
-    //   .addColumn('permissionsRequestId', 'text')
-    //   .addColumn('attester', 'text')
-    //   .addColumn('protocolPath', 'text')
-    //   .addColumn('recipient', 'text')
-    //   .addColumn('contextId', 'text')
-    //   .addColumn('parentId', 'text')
-    //   .addColumn('permissionGrantId', 'text')
-    //   .addColumn('prune', 'text');
-    //   // "indexes" end
-
-    // let createRecordsTagsTable = this.#db.schema
-    //   .createTable('eventLogRecordsTags')
-    //   .ifNotExists()
-    //   .addColumn('tag', 'text', (col) => col.notNull())
-    //   .addColumn('valueString', 'text')
-    //   .addColumn('valueNumber', 'decimal');
-    // // Add columns that have dialect-specific constraints
-    // createTable = this.#dialect.addAutoIncrementingColumn(createTable, 'watermark', (col) => col.primaryKey());
-    // createRecordsTagsTable = this.#dialect.addAutoIncrementingColumn(createRecordsTagsTable, 'id', (col) => col.primaryKey());
-    // createRecordsTagsTable = this.#dialect.addReferencedColumn(createRecordsTagsTable, 'eventLogRecordsTags', 'eventWatermark', 'integer', 'eventLogMessages', 'watermark', 'cascade');
-
-    // await createTable.execute();
-    // await createRecordsTagsTable.execute();
-  //}
 
   async close(): Promise<void> {
     this.#client.destroy();
@@ -263,7 +199,7 @@ export class EventLogNoSql implements EventLog {
     // Iterate over each key-value pair in the object
     for (let key in obj) {
         if (obj.hasOwnProperty(key)) {
-            // Construct new key with prefix only for top-level keys
+            // Construct new key with prefix only for top-level keys to prevent reserved dynamodb attribute names
             if ( key == "schema" ) {
               newObj["xschema"] = obj[key];
             } else if ( key == "method" ) {
@@ -275,46 +211,6 @@ export class EventLogNoSql implements EventLog {
     }
     
     return newObj;
-  }
-
-  /**
-   * Constructs a transactional operation to insert an event into the database.
-   */
-  private constructPutEventOperation(queryOptions: {
-    tenant: string;
-    messageCid: string;
-    indexes: KeyValues;
-  }): (tx: Transaction<DwnDatabaseType>) => Promise<void> {
-    const { tenant, messageCid, indexes } = queryOptions;
-    return async (tx) => {
-      
-    };
-    // const { tenant, messageCid, indexes } = queryOptions;
-
-    
-
-    // // we extract the tag indexes into their own object to be inserted separately.
-    // // we also sanitize the indexes to convert any `boolean` values to `text` representations.
-    // const { indexes: appendIndexes, tags } = extractTagsAndSanitizeIndexes(indexes);
-
-    // return async (tx) => {
-
-    //   const eventIndexValues = {
-    //     tenant,
-    //     messageCid,
-    //     ...appendIndexes,
-    //   };
-
-    //   // we use the dialect-specific `insertThenReturnId` in order to be able to extract the `insertId`
-    //   const result = await this.#dialect
-    //     .insertThenReturnId(tx, 'eventLogMessages', eventIndexValues, 'watermark as insertId')
-    //     .executeTakeFirstOrThrow();
-
-    //   // if tags exist, we execute those within the transaction associating them with the `insertId`.
-    //   if (Object.keys(tags).length > 0) {
-    //     await this.#tags.executeTagsInsert(result.insertId, tags, tx);
-    //   }
-    // };
   }
 
   async getEvents(

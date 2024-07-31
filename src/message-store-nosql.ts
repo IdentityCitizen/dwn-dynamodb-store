@@ -11,9 +11,7 @@ import {
   SortDirection,
   PaginationCursor,
 } from '@tbd54566975/dwn-sdk-js';
-
-import { Kysely, Transaction } from 'kysely';
-import { DwnDatabaseType, KeyValues } from './types.js';
+import { KeyValues } from './types.js';
 import * as block from 'multiformats/block';
 import * as cbor from '@ipld/dag-cbor';
 import { Dialect } from './dialect/dialect.js';
@@ -37,13 +35,8 @@ import {
 import {
   marshall
 } from '@aws-sdk/util-dynamodb'
-import { executeWithRetryIfDatabaseIsLocked } from './utils/transaction.js';
 import { extractTagsAndSanitizeIndexes } from './utils/sanitize.js';
-import { filterSelectQuery } from './utils/filter.js';
 import { sha256 } from 'multiformats/hashes/sha2';
-import { TagTables } from './utils/tags.js';
-import { v4 as uuidv4 } from 'uuid';
-import Cursor from 'pg-cursor';
 
 
 
@@ -52,17 +45,20 @@ export class MessageStoreNoSql implements MessageStore {
   #client: DynamoDBClient;
 
   constructor(dialect: Dialect) {
-    this.#client = new DynamoDBClient({
-      region: 'localhost',
-      endpoint: 'http://0.0.0.0:8006',
-      credentials: {
-        accessKeyId: 'MockAccessKeyId',
-        secretAccessKey: 'MockSecretAccessKey'
-      },
-    });
-    // this.#client = new DynamoDBClient({
-    //   region: 'ap-southeast-2'
-    // });
+    if ( process.env.IS_OFFLINE ) {
+      this.#client = new DynamoDBClient({
+        region: 'localhost',
+        endpoint: 'http://0.0.0.0:8006',
+        credentials: {
+          accessKeyId: 'MockAccessKeyId',
+          secretAccessKey: 'MockSecretAccessKey'
+        },
+      });
+    } else {
+       this.#client = new DynamoDBClient({
+        region: 'ap-southeast-2'
+      });
+    }
   }
 
   async open(): Promise<void> {
@@ -337,7 +333,7 @@ export class MessageStoreNoSql implements MessageStore {
     }
 
     if ( pagination ) {
-      //console.log("PAG FOUND");
+      //console.log("PAGE FOUND");
       //console.log(pagination);
     }
 
@@ -554,12 +550,8 @@ export class MessageStoreNoSql implements MessageStore {
 
           //console.log("RAW RESULTS");
           //console.log(data.Items);
-
           //console.log("AFTER:");
           //console.log(filteredItems);
-
-          
-
           //console.log("messageCid");
           for ( const item of filteredItems ) {
             //console.log(item["messageCid"].S);
@@ -576,84 +568,6 @@ export class MessageStoreNoSql implements MessageStore {
         console.error("Error retrieving items:", err);
         throw err;
     }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    // if (!this.#db) {
-    //   throw new Error(
-    //     'Connection to database not open. Call `open` before using `query`.'
-    //   );
-    // }
-
-    // options?.signal?.throwIfAborted();
-
-    // // extract sort property and direction from the supplied messageSort
-    // const { property: sortProperty, direction: sortDirection } = this.extractSortProperties(messageSort);
-
-    // let query = this.#db
-    //   .selectFrom('messageStoreMessages')
-    //   .leftJoin('messageStoreRecordsTags', 'messageStoreRecordsTags.messageInsertId', 'messageStoreMessages.id')
-    //   .select('messageCid')
-    //   .distinct()
-    //   .select([
-    //     'encodedMessageBytes',
-    //     'encodedData',
-    //     sortProperty,
-    //   ])
-    //   .where('tenant', '=', tenant);
-
-    // // filter sanitization takes place within `filterSelectQuery`
-    // query = filterSelectQuery(filters, query);
-
-    // if(pagination?.cursor !== undefined) {
-    //   // currently the sort property is explicitly either `dateCreated` | `messageTimestamp` | `datePublished` which are all strings
-    //   // TODO: https://github.com/TBD54566975/dwn-sdk-js/issues/664 to handle the edge case
-    //   const cursorValue = pagination.cursor.value as string;
-    //   const cursorMessageId = pagination.cursor.messageCid;
-
-    //   query = query.where(({ eb, refTuple, tuple }) => {
-    //     const direction = sortDirection === SortDirection.Ascending ? '>' : '<';
-    //     // https://kysely-org.github.io/kysely-apidoc/interfaces/ExpressionBuilder.html#refTuple
-    //     return eb(refTuple(sortProperty, 'messageCid'), direction, tuple(cursorValue, cursorMessageId));
-    //   });
-    // }
-
-    // const orderDirection = sortDirection === SortDirection.Ascending ? 'asc' : 'desc';
-    // // sorting by the provided sort property, the tiebreak is always in ascending order regardless of sort
-    // query =  query
-    //   .orderBy(sortProperty, orderDirection)
-    //   .orderBy('messageCid', orderDirection);
-
-    // if (pagination?.limit !== undefined && pagination?.limit > 0) {
-    //   // we query for one additional record to decide if we return a pagination cursor or not.
-    //   query = query.limit(pagination.limit + 1);
-    // }
-
-    // const results = await executeUnlessAborted(
-    //   query.execute(),
-    //   options?.signal
-    // );
-
-    // // prunes the additional requested message, if it exists, and adds a cursor to the results.
-    // // also parses the encoded message for each of the returned results.
-    // return this.processPaginationResults(results, sortProperty, pagination?.limit, options);
   }
 
   async delete(
@@ -762,11 +676,6 @@ export class MessageStoreNoSql implements MessageStore {
           scanParams.ExclusiveStartKey = scanResult.LastEvaluatedKey;
 
       } while (scanResult.LastEvaluatedKey);
-
-      // Since DynamoDB is eventual consistency, wait 5 seconds between calls
-      // //console.log("Waiting 5 seconds.");
-      // await this.sleep(5000)
-      // //console.log("Finished waiting 5 seconds.");
 
       //console.log("Successfully cleared all data from " + this.#tableName );
     } catch (err) {

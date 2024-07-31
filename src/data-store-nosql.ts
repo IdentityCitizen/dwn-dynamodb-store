@@ -1,7 +1,5 @@
 import { DataStore, DataStream, DataStoreGetResult, DataStorePutResult } from '@tbd54566975/dwn-sdk-js';
-import { Kysely } from 'kysely';
 import { Readable } from 'readable-stream';
-import { DwnDatabaseType } from './types.js';
 import { Dialect } from './dialect/dialect.js';
 import { 
   DynamoDBClient,
@@ -15,8 +13,7 @@ import {
   PutItemCommand,
   ScanCommand,
   DeleteItemCommand,
-  ScanCommandInput,
-  ScanCommandOutput
+  ScanCommandInput
 } from '@aws-sdk/client-dynamodb';
 import {
   marshall
@@ -25,17 +22,23 @@ import {
 export class DataStoreNoSql implements DataStore {
 
   #client: DynamoDBClient;
-  #tableName: "dataStore";
+  #tableName = "dataStore";
 
   constructor(dialect: Dialect) {
-    this.#client = new DynamoDBClient({
-      region: 'localhost',
-      endpoint: 'http://0.0.0.0:8006',
-      credentials: {
-        accessKeyId: 'MockAccessKeyId',
-        secretAccessKey: 'MockSecretAccessKey'
-      },
-    });
+    if ( process.env.IS_OFFLINE ) {
+      this.#client = new DynamoDBClient({
+        region: 'localhost',
+        endpoint: 'http://0.0.0.0:8006',
+        credentials: {
+          accessKeyId: 'MockAccessKeyId',
+          secretAccessKey: 'MockSecretAccessKey'
+        },
+      });
+    } else {
+       this.#client = new DynamoDBClient({
+        region: 'ap-southeast-2'
+      });
+    }
   }
 
   async open(): Promise<void> {
