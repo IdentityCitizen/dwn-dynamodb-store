@@ -11,7 +11,9 @@ import {
   SortDirection,
   PaginationCursor,
 } from '@tbd54566975/dwn-sdk-js';
-import { KeyValues } from './types.js';
+
+import { Kysely, Transaction } from 'kysely';
+import { DwnDatabaseType, KeyValues } from './types.js';
 import * as block from 'multiformats/block';
 import * as cbor from '@ipld/dag-cbor';
 import { Dialect } from './dialect/dialect.js';
@@ -35,8 +37,14 @@ import {
 import {
   marshall
 } from '@aws-sdk/util-dynamodb'
-import { extractTagsAndSanitizeIndexes } from './utils/sanitize.js';
+import { executeWithRetryIfDatabaseIsLocked } from './utils/transaction.js';
+import { extractTagsAndSanitizeIndexes, replaceReservedWords } from './utils/sanitize.js';
+import { filterSelectQuery } from './utils/filter.js';
 import { sha256 } from 'multiformats/hashes/sha2';
+import { TagTables } from './utils/tags.js';
+import { v4 as uuidv4 } from 'uuid';
+import Cursor from 'pg-cursor';
+import { isBooleanObject } from 'util/types';
 
 
 
@@ -45,20 +53,17 @@ export class MessageStoreNoSql implements MessageStore {
   #client: DynamoDBClient;
 
   constructor(dialect: Dialect) {
-    if ( process.env.IS_OFFLINE ) {
-      this.#client = new DynamoDBClient({
-        region: 'localhost',
-        endpoint: 'http://0.0.0.0:8006',
-        credentials: {
-          accessKeyId: 'MockAccessKeyId',
-          secretAccessKey: 'MockSecretAccessKey'
-        },
-      });
-    } else {
-       this.#client = new DynamoDBClient({
-        region: 'ap-southeast-2'
-      });
-    }
+    this.#client = new DynamoDBClient({
+      region: 'localhost',
+      endpoint: 'http://0.0.0.0:8006',
+      credentials: {
+        accessKeyId: 'MockAccessKeyId',
+        secretAccessKey: 'MockSecretAccessKey'
+      },
+    });
+    // this.#client = new DynamoDBClient({
+    //   region: 'ap-southeast-2'
+    // });
   }
 
   async open(): Promise<void> {
@@ -215,7 +220,10 @@ export class MessageStoreNoSql implements MessageStore {
     // Since we're working with docs here, there should be no reason why we can't
     // put it in one write.
     //console.log("CID: " + messageCid);
+    //console.log("INDEXES\n========================");
+    //console.log(indexes);
     const { indexes: putIndexes, tags } = extractTagsAndSanitizeIndexes(indexes);
+    const fixIndexes = replaceReservedWords(putIndexes);
     const input = {
       "Item": {
         "tenant": {
@@ -227,13 +235,13 @@ export class MessageStoreNoSql implements MessageStore {
         "encodedMessageBytes": {
           "B": encodedMessageBytes
         },
-        ...tags,
-        ...putIndexes
+        ...marshall(tags),
+        ...marshall(fixIndexes)
       },
       "TableName": this.#tableName
     };
-
-    //console.log(input);
+    //console.log("PUT\n======================");
+    //console.log(JSON.stringify(input, null, 2));
 
     // Adding special elements with messageCid concatenated, we use this for sorting where messageCid breaks tiebreaks
     if ( input.Item["dateCreated"] ) {
@@ -328,12 +336,12 @@ export class MessageStoreNoSql implements MessageStore {
     options?: MessageStoreOptions
   ): Promise<{ messages: GenericMessage[], cursor?: PaginationCursor}> {
     if ( filters ) {
-      //console.log("FILTER FOUND");
+      //console.log("FILTER FOUND\n====================");
       //console.log(filters);
     }
 
     if ( pagination ) {
-      //console.log("PAGE FOUND");
+      //console.log("PAG FOUND");
       //console.log(pagination);
     }
 
@@ -352,44 +360,59 @@ export class MessageStoreNoSql implements MessageStore {
       const { property: sortProperty, direction: sortDirection } = this.extractSortProperties(messageSort);
 
       const filterDynamoDB: any = [];
+      const expressionAttributeValues = {};
 
-      for (const filter of filters) {
+      // Dynamically generate a filter that will run server side in DynamoDB
+      for (const [index, filter] of filters.entries()) {
         const constructFilter = {
           FilterExpression: "",
-          ExpressionAttributeValues: {}
         }
         const conditions: string[] = [];
-        for ( const key in filter ) {
+        for ( const keyRaw in filter ) {
+          // "schema" and "method" are reserved keywords so we replace them here
+          const key = (keyRaw == "schema" ? "xschema" : keyRaw == "method" ? "xmethod" : keyRaw).replace("\.", "");
+          
           constructFilter.FilterExpression += key;
-          const value = filter[key];
+          const value = filter[keyRaw];
           if (typeof value === 'object') {
             if (value["gt"]) {
-              conditions.push(key + " > :" + key + "GT");
-              constructFilter.ExpressionAttributeValues[":" + key + "GT"] = value["gt"]
+              conditions.push(key + " > :x" + key + index + "GT");
+              expressionAttributeValues[":x" + key +  index + "GT"] = value["gt"]
             }
             if (value["gte"]) {
-              conditions.push(key + " >= :" + key + "GTE");
-              constructFilter.ExpressionAttributeValues[":" + key + "GTE"] = value["gte"]
+              conditions.push(key + " >= :x" + key + index + "GTE");
+              expressionAttributeValues[":x" + key + index + "GTE"] = value["gte"]
             }
             if (value["lt"]) {
-              conditions.push(key + " < :" + key + "LT");
-              constructFilter.ExpressionAttributeValues[":" + key + "LT"] = value["lt"]
+              conditions.push(key + " < :x" + key + index + "LT");
+              expressionAttributeValues[":x" + key + index + "LT"] = value["lt"]
             }
             if (value["lte"]) {
-              conditions.push(key + " <= :" + key + "LTE");
-              constructFilter.ExpressionAttributeValues[":" + key + "LTE"] = value["lte"]
+              conditions.push(key + " <= :x" + key + index + "LTE");
+              expressionAttributeValues[":x" + key + index + "LTE"] = value["lte"]
             }
           } else {
-            conditions.push(key + " = :" + key + "EQ");
-            constructFilter.ExpressionAttributeValues[":" + key + "EQ"] = filter[key].toString();
+            conditions.push(key + " = :x" + key + index + "EQ");
+            // we store booleans as a string in dynamodb, so check the value type and convert to string if required
+            expressionAttributeValues[":x" + key + index + "EQ"] = typeof filter[keyRaw] === 'boolean' ? filter[keyRaw].toString() : filter[keyRaw];
           }
         }
-        constructFilter.FilterExpression = conditions.join(" AND ");
-        filterDynamoDB.push(constructFilter);
+
+        // handle empty filters
+        if ( conditions.length > 0 ) {
+          filterDynamoDB.push("(" + conditions.join(" AND ") + ")");
+        }
+        
       }
       //console.log(filterDynamoDB);
       
         let params: any = this.cursorInputSort(tenant, pagination, sortProperty, sortDirection, filters);
+        expressionAttributeValues[':tenant'] = tenant;
+        params["ExpressionAttributeValues"] = marshall(expressionAttributeValues);
+        const filterExp = filterDynamoDB.join(" OR ");
+        if ( filterExp ) {
+          params.FilterExpression = filterExp;
+        }
         //console.log("PARAMS");
         //console.log(params);
         const command = new QueryCommand(params);
@@ -423,6 +446,9 @@ export class MessageStoreNoSql implements MessageStore {
           }
         }
 
+        //console.log("What's in DB:");
+        await this.dumpAll()
+        //console.log("AND WHAT WE RETURNED\n=====================")
         //console.log(data);
 
         // Extract and return the items from the response
@@ -550,14 +576,18 @@ export class MessageStoreNoSql implements MessageStore {
 
           //console.log("RAW RESULTS");
           //console.log(data.Items);
+
           //console.log("AFTER:");
           //console.log(filteredItems);
+
+          
+
           //console.log("messageCid");
           for ( const item of filteredItems ) {
             //console.log(item["messageCid"].S);
           }
 
-          const results = await this.processPaginationResults(filteredItems, sortProperty, data.LastEvaluatedKey, pagination?.limit, options);
+          const results = await this.processPaginationResults(data.Items, sortProperty, data.LastEvaluatedKey, pagination?.limit, options);
           //console.log("PROCESSED");
           //console.log(JSON.stringify(results, null, 2));
           return results;
@@ -568,6 +598,84 @@ export class MessageStoreNoSql implements MessageStore {
         console.error("Error retrieving items:", err);
         throw err;
     }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    // if (!this.#db) {
+    //   throw new Error(
+    //     'Connection to database not open. Call `open` before using `query`.'
+    //   );
+    // }
+
+    // options?.signal?.throwIfAborted();
+
+    // // extract sort property and direction from the supplied messageSort
+    // const { property: sortProperty, direction: sortDirection } = this.extractSortProperties(messageSort);
+
+    // let query = this.#db
+    //   .selectFrom('messageStoreMessages')
+    //   .leftJoin('messageStoreRecordsTags', 'messageStoreRecordsTags.messageInsertId', 'messageStoreMessages.id')
+    //   .select('messageCid')
+    //   .distinct()
+    //   .select([
+    //     'encodedMessageBytes',
+    //     'encodedData',
+    //     sortProperty,
+    //   ])
+    //   .where('tenant', '=', tenant);
+
+    // // filter sanitization takes place within `filterSelectQuery`
+    // query = filterSelectQuery(filters, query);
+
+    // if(pagination?.cursor !== undefined) {
+    //   // currently the sort property is explicitly either `dateCreated` | `messageTimestamp` | `datePublished` which are all strings
+    //   // TODO: https://github.com/TBD54566975/dwn-sdk-js/issues/664 to handle the edge case
+    //   const cursorValue = pagination.cursor.value as string;
+    //   const cursorMessageId = pagination.cursor.messageCid;
+
+    //   query = query.where(({ eb, refTuple, tuple }) => {
+    //     const direction = sortDirection === SortDirection.Ascending ? '>' : '<';
+    //     // https://kysely-org.github.io/kysely-apidoc/interfaces/ExpressionBuilder.html#refTuple
+    //     return eb(refTuple(sortProperty, 'messageCid'), direction, tuple(cursorValue, cursorMessageId));
+    //   });
+    // }
+
+    // const orderDirection = sortDirection === SortDirection.Ascending ? 'asc' : 'desc';
+    // // sorting by the provided sort property, the tiebreak is always in ascending order regardless of sort
+    // query =  query
+    //   .orderBy(sortProperty, orderDirection)
+    //   .orderBy('messageCid', orderDirection);
+
+    // if (pagination?.limit !== undefined && pagination?.limit > 0) {
+    //   // we query for one additional record to decide if we return a pagination cursor or not.
+    //   query = query.limit(pagination.limit + 1);
+    // }
+
+    // const results = await executeUnlessAborted(
+    //   query.execute(),
+    //   options?.signal
+    // );
+
+    // // prunes the additional requested message, if it exists, and adds a cursor to the results.
+    // // also parses the encoded message for each of the returned results.
+    // return this.processPaginationResults(results, sortProperty, pagination?.limit, options);
   }
 
   async delete(
@@ -676,6 +784,11 @@ export class MessageStoreNoSql implements MessageStore {
           scanParams.ExclusiveStartKey = scanResult.LastEvaluatedKey;
 
       } while (scanResult.LastEvaluatedKey);
+
+      // Since DynamoDB is eventual consistency, wait 5 seconds between calls
+      // //console.log("Waiting 5 seconds.");
+      // await this.sleep(5000)
+      // //console.log("Finished waiting 5 seconds.");
 
       //console.log("Successfully cleared all data from " + this.#tableName );
     } catch (err) {

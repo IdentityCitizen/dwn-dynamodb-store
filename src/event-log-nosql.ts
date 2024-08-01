@@ -1,6 +1,7 @@
 import type { EventLog, Filter, PaginationCursor } from '@tbd54566975/dwn-sdk-js';
 import { Dialect } from './dialect/dialect.js';
 import { extractTagsAndSanitizeIndexes } from './utils/sanitize-events.js';
+import { replaceReservedWords } from './utils/sanitize.js';
 import {
   marshall
 } from '@aws-sdk/util-dynamodb'
@@ -161,7 +162,7 @@ export class EventLogNoSql implements EventLog {
       //console.log("Incremented Count: " + incrementedCounter);
       const { indexes: putIndexes, tags } = extractTagsAndSanitizeIndexes(indexes);
       //console.log(putIndexes);
-      const fixIndexes = this.replaceReservedWords(putIndexes);
+      const fixIndexes = replaceReservedWords(putIndexes);
       const input = {
         "Item": {
           "tenant": {
@@ -187,31 +188,31 @@ export class EventLogNoSql implements EventLog {
     }
   }
 
-  // To avoid adding attributes which use reserved names, add an underscore prefix to indexes
-  private replaceReservedWords(obj) {
-    if (typeof obj !== 'object' || obj === null) {
-        return obj; // Base case: return non-object values as-is
-    }
+  // // To avoid adding attributes which use reserved names, add an underscore prefix to indexes
+  // private replaceReservedWords(obj) {
+  //   if (typeof obj !== 'object' || obj === null) {
+  //       return obj; // Base case: return non-object values as-is
+  //   }
     
-    // Initialize an empty object to store the modified properties
-    const newObj = {};
+  //   // Initialize an empty object to store the modified properties
+  //   const newObj = {};
     
-    // Iterate over each key-value pair in the object
-    for (let key in obj) {
-        if (obj.hasOwnProperty(key)) {
-            // Construct new key with prefix only for top-level keys to prevent reserved dynamodb attribute names
-            if ( key == "schema" ) {
-              newObj["xschema"] = obj[key];
-            } else if ( key == "method" ) {
-              newObj["xmethod"] = obj[key];
-            } else {
-              newObj[key] = obj[key];
-            }
-        }
-    }
+  //   // Iterate over each key-value pair in the object
+  //   for (let key in obj) {
+  //       if (obj.hasOwnProperty(key)) {
+  //           // Construct new key with prefix only for top-level keys to prevent reserved dynamodb attribute names
+  //           if ( key == "schema" ) {
+  //             newObj["xschema"] = obj[key];
+  //           } else if ( key == "method" ) {
+  //             newObj["xmethod"] = obj[key];
+  //           } else {
+  //             newObj[key] = obj[key];
+  //           }
+  //       }
+  //   }
     
-    return newObj;
-  }
+  //   return newObj;
+  // }
 
   async getEvents(
     tenant: string,

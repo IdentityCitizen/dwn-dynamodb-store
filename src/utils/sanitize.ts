@@ -17,7 +17,7 @@ export function extractTagsAndSanitizeIndexes(records: KeyValues): {
     if (key.startsWith('tag.')) {
       let value = indexes[key];
       delete indexes[key];
-      tags[key] = value;
+      tags[key.replace("\.", "")] = value;
     }
   }
 
@@ -32,11 +32,11 @@ export function sanitizeIndexes(records) {
       for (const valueItem of value) {
         sanitizedValues.push(sanitizedValue(valueItem));
       }
-      records[key] = { "S": JSON.stringify(sanitizedValues) };
+      records[key] = sanitizedValues;
       continue;
     }
 
-    records[key] = { "S": sanitizedValue(value).toString() };
+    records[key] = sanitizedValue(value);
   }
 }
 
@@ -106,4 +106,30 @@ export function sanitizeFilter(filter: Filter): Filter {
     filter[key] = sanitizeFilterValue(value);
   }
   return filter;
+}
+
+// To avoid adding attributes which use reserved names, add an underscore prefix to indexes
+export function replaceReservedWords(obj) {
+  if (typeof obj !== 'object' || obj === null) {
+      return obj; // Base case: return non-object values as-is
+  }
+  
+  // Initialize an empty object to store the modified properties
+  const newObj = {};
+  
+  // Iterate over each key-value pair in the object
+  for (let key in obj) {
+      if (obj.hasOwnProperty(key)) {
+          // Construct new key with prefix only for top-level keys to prevent reserved dynamodb attribute names
+          if ( key == "schema" ) {
+            newObj["xschema"] = obj[key];
+          } else if ( key == "method" ) {
+            newObj["xmethod"] = obj[key];
+          } else {
+            newObj[key] = obj[key];
+          }
+      }
+  }
+  
+  return newObj;
 }
