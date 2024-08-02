@@ -18,20 +18,18 @@ SQL backed implementations of DWN `MessageStore`, `DataStore`, and `EventLog`.
 - [Development](#development)
   - [Prerequisites](#prerequisites)
     - [`node` and `npm`](#node-and-npm)
-    - [Docker](#docker)
   - [Running Tests](#running-tests)
   - [`npm` scripts](#npm-scripts)
+  - [Environment Variables](#Running Tests)
 
 
 # Supported DBs
-* SQLite ✔️
-* MySQL ✔️
-* PostgreSQL ✔️
+* DynamoDB ✔️
 
 # Installation
 
 ```bash
-npm install @tbd54566975/dwn-sql-store
+npm install @tbd54566975/dwn-nosql-store
 ```
 
 # Usage
@@ -53,77 +51,6 @@ const sqliteDialect = new SqliteDialect({
 const messageStore = new MessageStoreSql(sqliteDialect);
 const dataStore = new DataStoreSql(sqliteDialect);
 const eventLog = new EventLogSql(sqliteDialect);
-
-const dwn = await Dwn.create({ messageStore, dataStore, eventLog });
-```
-
-## MySQL
-
-```typescript
-import { createPool } from 'mysql2';
-import { Dwn } from '@tbd54566975/dwn-sdk-js'
-import { MysqlDialect, MessageStoreSql, DataStoreSql, EventLogSql } from '@tbd54566975/dwn-sql-store';
-
-const mysqlDialect = new MysqlDialect({
-  pool: async () => createPool({
-    host     : 'localhost',
-    port     : 3306,
-    database : 'dwn',
-    user     : 'root',
-    password : 'dwn'
-  })
-});
-
-const messageStore = new MessageStoreSql(mysqlDialect);
-const dataStore = new DataStoreSql(mysqlDialect);
-const eventLog = new EventLogSql(mysqlDialect);
-
-const dwn = await Dwn.create({ messageStore, dataStore, eventLog });
-```
-
-## PostgreSQL
-
-NOTE: PostgreSQL requires setting the `LC_COLLATE` and `LC_CTYPE`to `C` during database creation.
-examples:
-
-When using `docker` include the following option
-```
-POSTGRES_INITDB_ARGS='--lc-collate=C --lc-ctype=C'
-```
-
-Or when creating the database.
-```
-CREATE DATABASE dwn_data_store_dev
-  WITH ENCODING='UTF8'
-  ...
-       LC_COLLATE='C'
-       LC_CTYPE='C'
-  ...
-
-```
-
-
-```typescript
-import pg from 'pg';
-import Cursor from 'pg-cursor';
-
-import { Dwn } from '@tbd54566975/dwn-sdk-js'
-import { PostgresDialect, MessageStoreSql, DataStoreSql, EventLogSql } from '@tbd54566975/dwn-sql-store';
-
-const postgresDialect = new PostgresDialect({
-  pool: async () => new pg.Pool({
-    host     : 'localhost',
-    port     : 5432,
-    database : 'dwn',
-    user     : 'root',
-    password : 'dwn'
-  }),
-  cursor: Cursor
-});
-
-const messageStore = new MessageStoreSql(postgresDialect);
-const dataStore = new DataStoreSql(postgresDialect);
-const eventLog = new EventLogSql(postgresDialect);
 
 const dwn = await Dwn.create({ messageStore, dataStore, eventLog });
 ```
@@ -151,9 +78,6 @@ npm i serverless -g
 If you don't have `node` installed. Feel free to choose whichever approach you feel the most comfortable with. If you don't have a preferred installation method, i'd recommend using `nvm` (aka node version manager). `nvm` allows you to install and use different versions of node. It can be installed by running `brew install nvm` (assuming that you have homebrew)
 
 Once you have installed `nvm`, install the desired node version with `nvm install vX.Y.Z`.
-
-### Docker
-Docker is used to spin up a local containerized DBs for testing purposes. Docker from [here](https://docs.docker.com/engine/install/)
 
 ## Running Tests
 > 💡 Make sure you have all the [prerequisites](#prerequisites)
