@@ -20,7 +20,7 @@ SQL backed implementations of DWN `MessageStore`, `DataStore`, and `EventLog`.
     - [`node` and `npm`](#node-and-npm)
   - [Running Tests](#running-tests)
   - [`npm` scripts](#npm-scripts)
-  - [Environment Variables](#Running Tests)
+  - [Environment Variables](#environment-variables)
 
 
 # Supported DBs
