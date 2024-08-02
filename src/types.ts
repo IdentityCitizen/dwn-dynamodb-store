@@ -1,9 +1,7 @@
-import type { Generated } from 'kysely';
-
 export type KeyValues = { [key:string]: string | number | boolean | string[] | number[] };
 
 type EventLogTable = {
-  watermark: Generated<number>;
+  watermark: number;
   tenant: string;
   messageCid: string;
 
@@ -41,7 +39,7 @@ type EventLogTable = {
 }
 
 type MessageStoreTable = {
-  id: Generated<number>;
+  id: number;
   tenant: string;
   messageCid: string;
   encodedMessageBytes: Uint8Array;
@@ -80,7 +78,7 @@ type MessageStoreTable = {
 }
 
 type MessageStoreRecordsTagsTable = {
-  id: Generated<number>;
+  id: number;
   tag: string;
   messageInsertId: number;
   valueString: string | null;
@@ -88,7 +86,7 @@ type MessageStoreRecordsTagsTable = {
 };
 
 type EventLogRecordsTagsTable = {
-  id: Generated<number>;
+  id: number;
   tag: string;
   eventWatermark: number;
   valueString: string | null;
@@ -96,7 +94,7 @@ type EventLogRecordsTagsTable = {
 };
 
 type DataStoreTable = {
-  id: Generated<number>;
+  id: number;
   tenant: string;
   recordId: string;
   dataCid: string;

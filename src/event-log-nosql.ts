@@ -31,7 +31,7 @@ export class EventLogNoSql implements EventLog {
   #client: DynamoDBClient;
 
   constructor(dialect: Dialect) {
-    if ( process.env.IS_OFFLINE ) {
+    if ( process.env.IS_OFFLINE == "true" ) {
       this.#client = new DynamoDBClient({
         region: 'localhost',
         endpoint: 'http://0.0.0.0:8006',
@@ -41,31 +41,22 @@ export class EventLogNoSql implements EventLog {
         },
       });
     } else {
-       this.#client = new DynamoDBClient({
+      this.#client = new DynamoDBClient({
         region: 'ap-southeast-2'
       });
     }
   }
 
   async open(): Promise<void> {
-    //console.log("Created client");
 
-    const input = { // ListTablesInput
-      //Limit: Number("1"),
-    };
+    const input = {};
     const command = new ListTablesCommand(input);
     const response = await this.#client.send(command);
-    //console.log(response);
 
     // Does table already exist?
     if ( response.TableNames ) {
-      //console.log("Found Table Names in response");
-      //console.log(response.TableNames);
       const tableExists = response.TableNames?.length > 0 && response.TableNames?.indexOf(this.#tableName) !== -1
-      if ( tableExists ) {
-        //console.log(this.#tableName + " TABLE ALREADY EXISTS");
-      } else {
-        //console.log("Trying to create table");
+      if ( !tableExists ) {
         const createTableInput = { // CreateTableInput
           AttributeDefinitions: [ // AttributeDefinitions // required
             { // AttributeDefinition
@@ -108,13 +99,10 @@ export class EventLogNoSql implements EventLog {
           TableClass: "STANDARD" as TableClass,
         };
 
-        //console.log("Create Table command");
         const createTableCommand = new CreateTableCommand(createTableInput);
 
-        //console.log("Send table command");
         try {
-          const createTableResponse = await this.#client.send(createTableCommand);
-          //console.log(createTableResponse);
+          await this.#client.send(createTableCommand);
         } catch ( error ) {
           console.error(error);
         }
@@ -159,9 +147,7 @@ export class EventLogNoSql implements EventLog {
       const updateResult = await this.#client.send(updateCommand);
       const incNumber: string = updateResult.Attributes?.["count"]?.N ?? "";
       const incrementedCounter = parseInt(incNumber, 10);
-      //console.log("Incremented Count: " + incrementedCounter);
       const { indexes: putIndexes, tags } = extractTagsAndSanitizeIndexes(indexes);
-      //console.log(putIndexes);
       const fixIndexes = replaceReservedWords(putIndexes);
       const input = {
         "Item": {
@@ -178,9 +164,7 @@ export class EventLogNoSql implements EventLog {
         "TableName": this.#tableName
       };
 
-      //console.log(input);
       
-      //console.log(input.Item.messageCid.S + " - " + input.Item.watermark.N);
       const command = new PutItemCommand(input);
       await this.#client.send(command);
     } catch ( error ) {
@@ -235,11 +219,9 @@ export class EventLogNoSql implements EventLog {
     }
 
     if ( filters ) {
-      //console.log(JSON.stringify(filters, null, 2));
     }
 
     if ( cursor ) {
-      //console.log(JSON.stringify(cursor, null, 2));
     }
 
     try {
@@ -284,8 +266,6 @@ export class EventLogNoSql implements EventLog {
 
       expressionAttributeValues[':tenant'] = tenant;
 
-      //console.log(filterDynamoDB.join(" OR "));
-      //console.log(expressionAttributeValues);
 
       const filterExp = filterDynamoDB.join(" OR ");
 
@@ -308,7 +288,6 @@ export class EventLogNoSql implements EventLog {
         params["ExclusiveStartKey"] = JSON.parse(cursor.messageCid);
       }
 
-      //console.log(params);
 
       const command = new QueryCommand(params);
       const data = await this.#client.send(command);
@@ -326,57 +305,10 @@ export class EventLogNoSql implements EventLog {
         
 
         for (let { messageCid, watermark } of data.Items) {
-          //console.log(messageCid?.S + " - " + watermark?.N);
             events.push(messageCid?.S ?? "");
         }
-        //console.log("Returning: ");
-        //console.log(events);
         return { events, cursor };
       }
-        
-
-      // let query = this.#db
-      //   .selectFrom('eventLogMessages')
-      //   .leftJoin('eventLogRecordsTags', 'eventLogRecordsTags.eventWatermark', 'eventLogMessages.watermark')
-      //   .select('messageCid')
-      //   .distinct()
-      //   .select('watermark')
-      //   .where('tenant', '=', tenant);
-
-      // if (filters.length > 0) {
-      //   // filter sanitization takes place within `filterSelectQuery`
-      //   query = filterSelectQuery(filters, query);
-      // }
-
-      // if(cursor !== undefined) {
-      //   // eventLogMessages in the sql store uses the watermark cursor value which is a number in SQL
-      //   // if not we will return empty results
-      //   const cursorValue = cursor.value as number;
-      //   const cursorMessageCid = cursor.messageCid;
-
-      //   query = query.where(({ eb, refTuple, tuple }) => {
-      //     // https://kysely-org.github.io/kysely-apidoc/interfaces/ExpressionBuilder.html#refTuple
-      //     return eb(refTuple('watermark', 'messageCid'), '>', tuple(cursorValue, cursorMessageCid));
-      //   });
-      // }
-
-      // query = query.orderBy('watermark', 'asc').orderBy('messageCid', 'asc');
-
-      // const events: string[] = [];
-      // // we always return a cursor with the event log query, so we set the return cursor to the properties of the last item.
-      // let returnCursor: PaginationCursor | undefined;
-      // if (this.#dialect.isStreamingSupported) {
-      //   for await (let { messageCid, watermark: value } of query.stream()) {
-      //     events.push(messageCid);
-      //     returnCursor = { messageCid, value };
-      //   }
-      // } else {
-      //   const results = await query.execute();
-      //   for (let { messageCid, watermark: value } of results) {
-      //     events.push(messageCid);
-      //     returnCursor = { messageCid, value };
-      //   }
-      // }
 
     } catch (error) {
       console.error(error);
@@ -431,17 +363,14 @@ export class EventLogNoSql implements EventLog {
                 [this.#tableName]: deleteRequests
             }
         });
-        //console.log(JSON.stringify(batches));
     }
 
     // Execute batches using batchWriteItem
     for (const batch of batches) {
-      //console.log(JSON.stringify(batch));
       const command = new BatchWriteItemCommand(batch);
       try {
         
           const response = await this.#client.send(command);
-          //console.log('Batch delete successful:', response);
       } catch (error) {
           console.error('Error deleting batch:', error);
           // Handle error as needed
@@ -476,10 +405,8 @@ export class EventLogNoSql implements EventLog {
                       'messageCid': { S: item.messageCid.S.toString() }
                   }
               };
-              //console.log(deleteParams);
               let deleteCommand = new DeleteItemCommand(deleteParams);
               await this.#client.send(deleteCommand);
-              //console.log("Deleted item successfully");
           }
 
           // Continue scanning if we have more items
@@ -487,7 +414,6 @@ export class EventLogNoSql implements EventLog {
 
       } while (scanResult.LastEvaluatedKey);
 
-      //console.log(`Successfully cleared all data from "dataStore"`);
     } catch (err) {
         console.error('Unable to clear table:', err);
     }

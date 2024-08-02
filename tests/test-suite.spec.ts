@@ -13,14 +13,6 @@ if (!globalThis.crypto) globalThis.crypto = webcrypto;
 
 describe('NoSQL Store Test Suite', () => {
 
-  // describe('DynamoDB Support', () => {
-  //   TestSuite.runStoreDependentTests({
-  //     messageStore       : new MessageStoreNoSql(testDynamoDBDialect),
-  //     dataStore          : new DataStoreNoSql(testDynamoDBDialect),
-  //     eventLog           : new EventLogSql(testDynamoDBDialect),
-  //     resumableTaskStore : new ResumableTaskStoreNoSql(testDynamoDBDialect),
-  //   });
-  // });
   describe('DynamoDB Support', () => {
     TestSuite.runStoreDependentTests({
       messageStore       : new MessageStoreNoSql(testDynamoDBDialect),

@@ -175,3 +175,10 @@ Docker is used to spin up a local containerized DBs for testing purposes. Docker
 | `npm run test-coverage` | runs tests and includes coverage            |
 | `npm run lint`          | runs linter                                 |
 | `npm run lint:fix`      | runs linter and fixes auto-fixable problems |
+
+## Environment Variables
+
+| Environment Variable    | Description                                 |
+| ----------------------- | ------------------------------------------- |
+| `IS_OFFLINE`            | Uses a local DynamoDB instance for testing  |
+

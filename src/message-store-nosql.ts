@@ -12,8 +12,7 @@ import {
   PaginationCursor,
 } from '@tbd54566975/dwn-sdk-js';
 
-import { Kysely, Transaction } from 'kysely';
-import { DwnDatabaseType, KeyValues } from './types.js';
+import { KeyValues } from './types.js';
 import * as block from 'multiformats/block';
 import * as cbor from '@ipld/dag-cbor';
 import { Dialect } from './dialect/dialect.js';
@@ -37,14 +36,8 @@ import {
 import {
   marshall
 } from '@aws-sdk/util-dynamodb'
-import { executeWithRetryIfDatabaseIsLocked } from './utils/transaction.js';
 import { extractTagsAndSanitizeIndexes, replaceReservedWords } from './utils/sanitize.js';
-import { filterSelectQuery } from './utils/filter.js';
 import { sha256 } from 'multiformats/hashes/sha2';
-import { TagTables } from './utils/tags.js';
-import { v4 as uuidv4 } from 'uuid';
-import Cursor from 'pg-cursor';
-import { isBooleanObject } from 'util/types';
 
 
 
@@ -53,38 +46,35 @@ export class MessageStoreNoSql implements MessageStore {
   #client: DynamoDBClient;
 
   constructor(dialect: Dialect) {
-    this.#client = new DynamoDBClient({
-      region: 'localhost',
-      endpoint: 'http://0.0.0.0:8006',
-      credentials: {
-        accessKeyId: 'MockAccessKeyId',
-        secretAccessKey: 'MockSecretAccessKey'
-      },
-    });
-    // this.#client = new DynamoDBClient({
-    //   region: 'ap-southeast-2'
-    // });
+    if ( process.env.IS_OFFLINE == "true" ) {
+      this.#client = new DynamoDBClient({
+        region: 'localhost',
+        endpoint: 'http://0.0.0.0:8006',
+        credentials: {
+          accessKeyId: 'MockAccessKeyId',
+          secretAccessKey: 'MockSecretAccessKey'
+        },
+      });
+    } else {
+      this.#client = new DynamoDBClient({
+        region: 'ap-southeast-2'
+      });
+    }
   }
 
   async open(): Promise<void> {
-    //console.log("Created client");
 
     const input = { // ListTablesInput
       //Limit: Number("1"),
     };
     const command = new ListTablesCommand(input);
     const response = await this.#client.send(command);
-    //console.log(response);
 
     // Does table already exist?
     if ( response.TableNames ) {
-      //console.log("Found Table Names in response");
-      //console.log(response.TableNames);
       const tableExists = response.TableNames?.length > 0 && response.TableNames?.indexOf(this.#tableName) !== -1
       if ( tableExists ) {
-        //console.log(this.#tableName + " TABLE ALREADY EXISTS");
       } else {
-        //console.log("Trying to create table");
         const createTableInput = { // CreateTableInput
           AttributeDefinitions: [ // AttributeDefinitions // required
             { // AttributeDefinition
@@ -155,13 +145,10 @@ export class MessageStoreNoSql implements MessageStore {
           TableClass: "STANDARD" as TableClass,
         };
 
-        //console.log("Create Table command");
         const createTableCommand = new CreateTableCommand(createTableInput);
 
-        //console.log("Send table command");
         try {
           const createTableResponse = await this.#client.send(createTableCommand);
-          //console.log(createTableResponse);
         } catch ( error ) {
           console.error(error);
         }
@@ -185,7 +172,6 @@ export class MessageStoreNoSql implements MessageStore {
       );
     }
 
-    //console.log(JSON.stringify(message));
 
     options?.signal?.throwIfAborted();
 
@@ -199,8 +185,6 @@ export class MessageStoreNoSql implements MessageStore {
         if(data) {
           delete (message as any).encodedData;
           encodedData = data;
-          //console.log("ENCODED DATA");
-          //console.log(encodedData);
         }
       }
       return { message, encodedData };
@@ -219,9 +203,6 @@ export class MessageStoreNoSql implements MessageStore {
     // In SQL this is split into an insert into a tags table and the message table.
     // Since we're working with docs here, there should be no reason why we can't
     // put it in one write.
-    //console.log("CID: " + messageCid);
-    //console.log("INDEXES\n========================");
-    //console.log(indexes);
     const { indexes: putIndexes, tags } = extractTagsAndSanitizeIndexes(indexes);
     const fixIndexes = replaceReservedWords(putIndexes);
     const input = {
@@ -240,8 +221,6 @@ export class MessageStoreNoSql implements MessageStore {
       },
       "TableName": this.#tableName
     };
-    //console.log("PUT\n======================");
-    //console.log(JSON.stringify(input, null, 2));
 
     // Adding special elements with messageCid concatenated, we use this for sorting where messageCid breaks tiebreaks
     if ( input.Item["dateCreated"] ) {
@@ -260,13 +239,10 @@ export class MessageStoreNoSql implements MessageStore {
       }
     } 
 
-    //console.log("PUT:");
-    //console.log(input);
     const command = new PutItemCommand(input);
     try {
       await this.#client.send(command);
     } catch ( error ) {
-      //console.log("FAILED");
       console.error(error);
     }
     
@@ -283,7 +259,6 @@ export class MessageStoreNoSql implements MessageStore {
       );
     }
     try {
-      //console.log("GET");
       options?.signal?.throwIfAborted();
 
       const input = { // GetItemInput
@@ -300,7 +275,6 @@ export class MessageStoreNoSql implements MessageStore {
           "tenant", "messageCid", "encodedMessageBytes", "encodedData"
         ]
       };
-      //console.log(input);
       const command = new GetItemCommand(input);
       const response = await executeUnlessAborted(
         this.#client.send(command),
@@ -320,10 +294,8 @@ export class MessageStoreNoSql implements MessageStore {
 
     
       const responseData = await this.parseEncodedMessage(result.encodedMessageBytes ? result.encodedMessageBytes: Buffer.from(""), result.encodedData, options);
-      //console.log(responseData);
       return responseData;
     } catch ( error ) {
-      //console.log("FAILED TO GET");
       console.error(error);
     }
   }
@@ -336,13 +308,9 @@ export class MessageStoreNoSql implements MessageStore {
     options?: MessageStoreOptions
   ): Promise<{ messages: GenericMessage[], cursor?: PaginationCursor}> {
     if ( filters ) {
-      //console.log("FILTER FOUND\n====================");
-      //console.log(filters);
     }
 
     if ( pagination ) {
-      //console.log("PAG FOUND");
-      //console.log(pagination);
     }
 
     if (!this.#client) {
@@ -355,7 +323,6 @@ export class MessageStoreNoSql implements MessageStore {
 
     options?.signal?.throwIfAborted();
 
-    //console.log("QUERY")
     try {
       const { property: sortProperty, direction: sortDirection } = this.extractSortProperties(messageSort);
 
@@ -404,7 +371,6 @@ export class MessageStoreNoSql implements MessageStore {
         }
         
       }
-      //console.log(filterDynamoDB);
       
         let params: any = this.cursorInputSort(tenant, pagination, sortProperty, sortDirection, filters);
         expressionAttributeValues[':tenant'] = tenant;
@@ -413,25 +379,19 @@ export class MessageStoreNoSql implements MessageStore {
         if ( filterExp ) {
           params.FilterExpression = filterExp;
         }
-        //console.log("PARAMS");
-        //console.log(params);
         const command = new QueryCommand(params);
         const data = await executeUnlessAborted(
           this.#client.send(command),
           options?.signal
         );
 
-        //console.log("LAST: " + JSON.stringify(data.LastEvaluatedKey));
         if( data.Items ) {
           for( const item of data?.Items ) {
-            //console.log(item.messageCid.S );
           }
         }
         
-        //console.log("IS LASTEVAL: " + data.LastEvaluatedKey !== undefined);
 
         delete params["Limit"];
-        //console.log(params);
 
         if ( data.ScannedCount !== undefined && data.Items !== undefined && data.ScannedCount > 0 && data.LastEvaluatedKey ) {
           let matches = true;
@@ -442,71 +402,19 @@ export class MessageStoreNoSql implements MessageStore {
           }
           if ( matches ) {
             delete data["LastEvaluatedKey"];
-            //console.log("MATCHES, DELETE!");
           }
         }
 
-        //console.log("What's in DB:");
         await this.dumpAll()
-        //console.log("AND WHAT WE RETURNED\n=====================")
-        //console.log(data);
 
         // Extract and return the items from the response
         if (data.Items) {
-
-          // //console.log("BEFORE:");
-          // //console.log("Sort Prop: " + sortProperty);
-          // //console.log("Direction: " + sortDirection);
-          // //console.log(data.Items.length);
-          // for ( const item of data.Items ) {
-          //   //console.log( item[sortProperty].S + " --- " + item["messageCid"].S)
-          // }
-          // data.Items.sort( (a, b) => {
-          //   // //console.log("")
-          //   // //console.log(a[sortProperty].S + " - " + a["messageCid"].S)
-          //   // //console.log(b[sortProperty].S + " - " + b["messageCid"].S)
-          //   if ( a[sortProperty].S == b[sortProperty].S ) {
-          //     //console.log("Found a match");
-          //     if ( sortDirection == 1 ) {
-          //       if ( a["messageCid"].S + "" > b["messageCid"].S + "" ) {
-          //         return 1
-          //       }
-          //       if ( a["messageCid"].S + "" < b["messageCid"].S + "" ) {
-          //         return -1
-          //       }
-          //     } else {
-          //       if ( a["messageCid"].S + "" > b["messageCid"].S + "" ) {
-          //         return -1
-          //       }
-          //       if ( a["messageCid"].S + "" < b["messageCid"].S + "" ) {
-          //         return 1
-          //       }
-          //     }
-          //   }
-          //   return sortDirection == -1 ? 1 : -1;
-          // });
-          // data.Items.sort((a, b) => {
-          //   // Sort by Name
-          //   if (a[sortProperty].S + "" < b[sortProperty].S + "") return -1 * sortDirection; // Multiplying by orderFactor to flip order if needed
-          //   if (a[sortProperty].S + "" > b[sortProperty].S + "") return 1 * sortDirection;
-
-          //   if (a["messageCid"].S + "" < b["messageCid"].S + "") return -1 * sortDirection; // Multiplying by orderFactor to flip order if needed
-          //   if (a["messageCid"].S + "" > b["messageCid"].S + "") return 1 * sortDirection;
-        
-          //   return 0;
-          // });
-          // //console.log("AFTER:");
-          // for ( const item of data.Items ) {
-          //   //console.log( item[sortProperty].S + " --- " + item["messageCid"].S)
-          // }
 
           const filteredItems = data.Items.filter(item => {
             let filterMatchCount = 0;
             for (const filter of filters) {
               let innerFilterMatch = true; // we'll set to false if it doesn't match
               for ( const key in filter ){
-                //console.log("Key:")
-                //console.log(key);
                 const value = filter[key];
                 if (typeof value === 'object') {
                   let rangeCount = 0;
@@ -514,7 +422,6 @@ export class MessageStoreNoSql implements MessageStore {
                   if (value["gt"]) {
                     rangeCount++;
                     if (item.hasOwnProperty(key) ) {
-                      //console.log("Compare: " + item[key].S + " - " + value["gt"]);
                       if ( item[key].S + "" > value["gt"] ) {
                         matchCount++;
                       }
@@ -523,7 +430,6 @@ export class MessageStoreNoSql implements MessageStore {
                   if (value["gte"]) {
                     rangeCount++;
                     if (item.hasOwnProperty(key) ) {
-                      //console.log("Compare: " + item[key].S + " - " + value["gte"]);
                       if ( item[key].S + "" >= value["gte"] ) {
                         matchCount++;
                       }
@@ -532,7 +438,6 @@ export class MessageStoreNoSql implements MessageStore {
                   if (value["lt"]) {
                     rangeCount++;
                     if (item.hasOwnProperty(key) ) {
-                      //console.log("Compare: " + item[key].S + " - " + value["lt"]);
                       if ( item[key].S + "" < value["lt"] ) {
                         matchCount++;
                       }
@@ -541,23 +446,16 @@ export class MessageStoreNoSql implements MessageStore {
                   if (value["lte"]) {
                     rangeCount++;
                     if (item.hasOwnProperty(key) ) {
-                      //console.log("Compare: " + item[key].S + " - " + value["lte"]);
                       if ( item[key].S + "" <= value["lte"] ) {
                         matchCount++;
                       }
                     }
                   }
-                  //console.log("Range Count: " + rangeCount);
-                  //console.log("Match Count: " + matchCount);
                   if( rangeCount > 0 && rangeCount !== matchCount ) {
                     innerFilterMatch = false;
                   }
                 } else {
                   const expectedValue = filter[key].toString();
-                  //console.log("Expected:")
-                  //console.log(expectedValue);
-                  //console.log("Current:")
-                  //console.log(JSON.stringify(item[key]));
                   // Check if item attribute matches expected value
                   if (!item.hasOwnProperty(key) || item[key].S !== expectedValue) {
                     innerFilterMatch = false; // Exclude item from filteredItems
@@ -574,22 +472,7 @@ export class MessageStoreNoSql implements MessageStore {
             return filterMatchCount > 0; // Include item in filteredItems
           });
 
-          //console.log("RAW RESULTS");
-          //console.log(data.Items);
-
-          //console.log("AFTER:");
-          //console.log(filteredItems);
-
-          
-
-          //console.log("messageCid");
-          for ( const item of filteredItems ) {
-            //console.log(item["messageCid"].S);
-          }
-
           const results = await this.processPaginationResults(data.Items, sortProperty, data.LastEvaluatedKey, pagination?.limit, options);
-          //console.log("PROCESSED");
-          //console.log(JSON.stringify(results, null, 2));
           return results;
         } else {
           return { messages: []};
@@ -599,83 +482,6 @@ export class MessageStoreNoSql implements MessageStore {
         throw err;
     }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    // if (!this.#db) {
-    //   throw new Error(
-    //     'Connection to database not open. Call `open` before using `query`.'
-    //   );
-    // }
-
-    // options?.signal?.throwIfAborted();
-
-    // // extract sort property and direction from the supplied messageSort
-    // const { property: sortProperty, direction: sortDirection } = this.extractSortProperties(messageSort);
-
-    // let query = this.#db
-    //   .selectFrom('messageStoreMessages')
-    //   .leftJoin('messageStoreRecordsTags', 'messageStoreRecordsTags.messageInsertId', 'messageStoreMessages.id')
-    //   .select('messageCid')
-    //   .distinct()
-    //   .select([
-    //     'encodedMessageBytes',
-    //     'encodedData',
-    //     sortProperty,
-    //   ])
-    //   .where('tenant', '=', tenant);
-
-    // // filter sanitization takes place within `filterSelectQuery`
-    // query = filterSelectQuery(filters, query);
-
-    // if(pagination?.cursor !== undefined) {
-    //   // currently the sort property is explicitly either `dateCreated` | `messageTimestamp` | `datePublished` which are all strings
-    //   // TODO: https://github.com/TBD54566975/dwn-sdk-js/issues/664 to handle the edge case
-    //   const cursorValue = pagination.cursor.value as string;
-    //   const cursorMessageId = pagination.cursor.messageCid;
-
-    //   query = query.where(({ eb, refTuple, tuple }) => {
-    //     const direction = sortDirection === SortDirection.Ascending ? '>' : '<';
-    //     // https://kysely-org.github.io/kysely-apidoc/interfaces/ExpressionBuilder.html#refTuple
-    //     return eb(refTuple(sortProperty, 'messageCid'), direction, tuple(cursorValue, cursorMessageId));
-    //   });
-    // }
-
-    // const orderDirection = sortDirection === SortDirection.Ascending ? 'asc' : 'desc';
-    // // sorting by the provided sort property, the tiebreak is always in ascending order regardless of sort
-    // query =  query
-    //   .orderBy(sortProperty, orderDirection)
-    //   .orderBy('messageCid', orderDirection);
-
-    // if (pagination?.limit !== undefined && pagination?.limit > 0) {
-    //   // we query for one additional record to decide if we return a pagination cursor or not.
-    //   query = query.limit(pagination.limit + 1);
-    // }
-
-    // const results = await executeUnlessAborted(
-    //   query.execute(),
-    //   options?.signal
-    // );
-
-    // // prunes the additional requested message, if it exists, and adds a cursor to the results.
-    // // also parses the encoded message for each of the returned results.
-    // return this.processPaginationResults(results, sortProperty, pagination?.limit, options);
   }
 
   async delete(
@@ -698,7 +504,6 @@ export class MessageStoreNoSql implements MessageStore {
           'messageCid': cid
       })
     };
-    // //console.log(deleteParams);
     let deleteCommand = new DeleteItemCommand(deleteParams);
     await executeUnlessAborted(
       this.#client.send(deleteCommand),
@@ -737,7 +542,6 @@ export class MessageStoreNoSql implements MessageStore {
               
               let deleteCommand = new DeleteItemCommand(deleteParams);
               await this.#client.send(deleteCommand);
-              //console.log("Deleted item successfully");
           }
 
           // Continue scanning if we have more items
@@ -746,11 +550,8 @@ export class MessageStoreNoSql implements MessageStore {
       } while (scanResult.LastEvaluatedKey);
 
       // Since DynamoDB is eventual consistency, wait 5 seconds between calls
-      // //console.log("Waiting 5 seconds.");
       // await this.sleep(5000)
-      // //console.log("Finished waiting 5 seconds.");
 
-      //console.log("Successfully cleared all data from " + this.#tableName );
     } catch (err) {
         console.error('Unable to clear table:', err);
     }
@@ -774,10 +575,8 @@ export class MessageStoreNoSql implements MessageStore {
       
       do {
           scanResult = await this.#client.send(scanCommand);
-          //console.log("COUNT: " + scanResult.Items.length)
           // Dump each item
           for (let item of scanResult.Items) {
-            //console.log(item);
           }
 
           // Continue scanning if we have more items
@@ -786,11 +585,8 @@ export class MessageStoreNoSql implements MessageStore {
       } while (scanResult.LastEvaluatedKey);
 
       // Since DynamoDB is eventual consistency, wait 5 seconds between calls
-      // //console.log("Waiting 5 seconds.");
       // await this.sleep(5000)
-      // //console.log("Finished waiting 5 seconds.");
 
-      //console.log("Successfully cleared all data from " + this.#tableName );
     } catch (err) {
         console.error('Unable to clear table:', err);
     }
@@ -818,8 +614,6 @@ export class MessageStoreNoSql implements MessageStore {
     // We store encodedData when the data is below a certain threshold.
     // https://github.com/TBD54566975/dwn-sdk-js/pull/456
     if (message !== undefined && encodedData !== undefined && encodedData !== null) {
-      //console.log("WE GOT HERE");
-      //console.log(encodedData);
       (message as any).encodedData = encodedData;
     }
     return message;
@@ -854,12 +648,9 @@ export class MessageStoreNoSql implements MessageStore {
       cursorValue[sortProperty + "Sort"] = lastMessage[sortProperty + "Sort"];
       cursorValue["messageCid"] = lastMessage["messageCid"];
       cursor = { messageCid: JSON.stringify(cursorValue), value: JSON.stringify(cursorValue) };
-      //console.log(cursor);
     }
     // if ( lastEvaluatedKey !== null && lastEvaluatedKey !== undefined ) {
     //   cursor = { messageCid: JSON.stringify(lastEvaluatedKey), value: JSON.stringify(lastEvaluatedKey) };
-    //   //console.log("CURSOR EXISTS");
-    //   //console.log(cursor);
     // }
 
     // extracts the full encoded message from the stored blob for each result item.
@@ -922,11 +713,8 @@ export class MessageStoreNoSql implements MessageStore {
       if ( pagination?.cursor ) {
         params["ExclusiveStartKey"] = JSON.parse(pagination.cursor.messageCid);
       }
-      //console.log(params);
       return params;
     } catch (error) {
-      //console.log("Caught error:");
-      //console.log(error);
       throw error;
     }
   }
