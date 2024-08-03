@@ -1,13 +1,7 @@
-# DWN SQL Stores <!-- omit in toc -->
-
-[![NPM](https://img.shields.io/npm/v/@tbd54566975/dwn-sql-store.svg?style=flat-square&logo=npm&logoColor=FFFFFF&color=FFEC19&santize=true)](https://www.npmjs.com/package/@tbd54566975/dwn-sql-store)
-[![Build Status](https://img.shields.io/github/actions/workflow/status/TBD54566975/dwn-sql-store/integrity-checks.yml?branch=main&logo=github&label=ci&logoColor=FFFFFF&style=flat-square)](https://github.com/TBD54566975/dwn-sql-store/actions/workflows/integrity-checks.yml)
-[![Coverage](https://img.shields.io/codecov/c/gh/tbd54566975/dwn-sql-store/main?logo=codecov&logoColor=FFFFFF&style=flat-square&token=YI87CKF1LI)](https://codecov.io/github/TBD54566975/dwn-sql-store)
-[![License](https://img.shields.io/npm/l/@tbd54566975/dwn-sql-store.svg?style=flat-square&color=24f2ff&logo=apache&logoColor=FFFFFF&santize=true)](https://github.com/TBD54566975/dwn-sql-store/blob/main/LICENSE)
-[![Chat](https://img.shields.io/badge/chat-on%20discord-7289da.svg?style=flat-square&color=9a1aff&logo=discord&logoColor=FFFFFF&sanitize=true)](https://discord.com/channels/937858703112155166/969272658501976117)
+# DWN AWS DynamoDB Store <!-- omit in toc -->
 
 
-SQL backed implementations of DWN `MessageStore`, `DataStore`, and `EventLog`. 
+DynamoDB NoSQL backed implementations of DWN `MessageStore`, `DataStore`, `EventLog` and `ResumableTask`. 
 
 - [Supported DBs](#supported-dbs)
 - [Installation](#installation)
@@ -24,33 +18,28 @@ SQL backed implementations of DWN `MessageStore`, `DataStore`, and `EventLog`.
 
 
 # Supported DBs
-* DynamoDB ✔️
+* AWS DynamoDB ✔️
+* AWS DynamoDB Local ✔️
 
 # Installation
 
 ```bash
-npm install @tbd54566975/dwn-nosql-store
+npm install @tbd54566975/dwn-dynamodb-store
 ```
 
 # Usage
 
-## SQLite
+## DynamoDB
 
 ```typescript
 import Database from 'better-sqlite3';
 
 import { Dwn } from '@tbd54566975/dwn-sdk-js'
-import { SqliteDialect, MessageStoreSql, DataStoreSql, EventLogSql } from '@tbd54566975/dwn-sql-store';
+import { MessageStoreNoSql, DataStoreNoSql, EventLogNoSql } from '@tbd54566975/dwn-sql-store';
 
-const sqliteDialect = new SqliteDialect({
-  database: async () => new Database('dwn.sqlite', {
-    fileMustExist: true,
-  })
-});
-
-const messageStore = new MessageStoreSql(sqliteDialect);
-const dataStore = new DataStoreSql(sqliteDialect);
-const eventLog = new EventLogSql(sqliteDialect);
+const messageStore = new MessageStoreNoSql({});
+const dataStore = new DataStoreNoSql({});
+const eventLog = new EventLogNoSql({});
 
 const dwn = await Dwn.create({ messageStore, dataStore, eventLog });
 ```
@@ -70,7 +59,7 @@ $ npm --version
 ```
 
 ### `serverless`
-This project uses serverless to run a local instance of dynamodb for testing.
+This project uses serverless to run a local instance of dynamodb for testing purposes only.
 ```
 npm i serverless -g
 ```
@@ -87,6 +76,8 @@ Once you have installed `nvm`, install the desired node version with `nvm instal
 2. Start the test databases using `./scripts/start-databases`
 3. Open a second terminal and run tests using `npm run test` (serverless struggles with daemons so it requires a dedicated terminal)
 
+`Ctrl+C` in the terminal where you started the database when tests have completed.
+
 ## `npm` scripts
 
 | Script                  | Description                                 |
@@ -102,7 +93,7 @@ Once you have installed `nvm`, install the desired node version with `nvm instal
 
 ## Environment Variables
 
-| Environment Variable    | Description                                 |
-| ----------------------- | ------------------------------------------- |
-| `IS_OFFLINE`            | Uses a local DynamoDB instance for testing  |
+| Environment Variable    | Value        | Description                                 |
+| ----------------------- | ------------ | ------------------------------------------- |
+| `IS_OFFLINE`            | true|false   | Uses a local DynamoDB instance for testing  |
 
