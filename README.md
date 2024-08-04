@@ -27,6 +27,10 @@ DynamoDB NoSQL backed implementations of DWN `MessageStore`, `DataStore`, `Event
 npm install @tbd54566975/dwn-dynamodb-store
 ```
 
+# Considerations
+
+- Since DynamoDB is an AWS hosted service, factor latency into your application requirements. Use the `REGION` environment variable to use an AWS Region closest to where your application runs.
+
 # Usage
 
 ## DynamoDB
@@ -93,7 +97,9 @@ Once you have installed `nvm`, install the desired node version with `nvm instal
 
 ## Environment Variables
 
-| Environment Variable    | Value        | Description                                 |
-| ----------------------- | ------------ | ------------------------------------------- |
-| `IS_OFFLINE`            | true|false   | Uses a local DynamoDB instance for testing  |
+| Environment Variable    | Value          | Description                                 |
+| ----------------------- | -------------- | ------------------------------------------- |
+| `IS_OFFLINE`            | true|false     | Uses a local DynamoDB instance for testing  |
+| `AWS_REGION`            | ap-southeast-2 | The region where the DynamoDB tables should be created (https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Concepts.RegionsAndAvailabilityZones.html) |
+
 
