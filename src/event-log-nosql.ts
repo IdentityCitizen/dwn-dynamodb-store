@@ -4,8 +4,8 @@ import { extractTagsAndSanitizeIndexes } from './utils/sanitize-events.js';
 import { replaceReservedWords } from './utils/sanitize.js';
 import {
   marshall
-} from '@aws-sdk/util-dynamodb'
-import { 
+} from '@aws-sdk/util-dynamodb';
+import {
   DynamoDBClient,
   ListTablesCommand,
   CreateTableCommand,
@@ -27,17 +27,17 @@ import {
 } from '@aws-sdk/client-dynamodb';
 
 export class EventLogNoSql implements EventLog {
-  #tableName: string = "eventLog";
+  #tableName = 'eventLog';
   #client: DynamoDBClient;
 
   constructor(dialect: Dialect) {
-    if ( process.env.IS_OFFLINE == "true" ) {
+    if ( process.env.IS_OFFLINE == 'true' ) {
       this.#client = new DynamoDBClient({
-        region: 'localhost',
-        endpoint: 'http://0.0.0.0:8006',
-        credentials: {
-          accessKeyId: 'MockAccessKeyId',
-          secretAccessKey: 'MockSecretAccessKey'
+        region      : 'localhost',
+        endpoint    : 'http://0.0.0.0:8006',
+        credentials : {
+          accessKeyId     : 'MockAccessKeyId',
+          secretAccessKey : 'MockSecretAccessKey'
         },
       });
     } else {
@@ -55,48 +55,48 @@ export class EventLogNoSql implements EventLog {
 
     // Does table already exist?
     if ( response.TableNames ) {
-      const tableExists = response.TableNames?.length > 0 && response.TableNames?.indexOf(this.#tableName) !== -1
+      const tableExists = response.TableNames?.length > 0 && response.TableNames?.indexOf(this.#tableName) !== -1;
       if ( !tableExists ) {
         const createTableInput = { // CreateTableInput
           AttributeDefinitions: [ // AttributeDefinitions // required
             { // AttributeDefinition
-              AttributeName: "tenant", // required
-              AttributeType: "S", // required
+              AttributeName : 'tenant', // required
+              AttributeType : 'S', // required
             } as AttributeDefinition,
             { // AttributeDefinition
-              AttributeName: "watermark", // required
-              AttributeType: "N", // required
+              AttributeName : 'watermark', // required
+              AttributeType : 'N', // required
             } as AttributeDefinition,
             { // AttributeDefinition
-              AttributeName: "messageCid", // required
-              AttributeType: "S", // required
+              AttributeName : 'messageCid', // required
+              AttributeType : 'S', // required
             } as AttributeDefinition,
           ],
-          TableName: this.#tableName, // required
-          KeySchema: [ // KeySchema // required
+          TableName : this.#tableName, // required
+          KeySchema : [ // KeySchema // required
             { // KeySchemaElement
-              AttributeName: "tenant", // required
-              KeyType: "HASH", // required
+              AttributeName : 'tenant', // required
+              KeyType       : 'HASH', // required
             } as KeySchemaElement,
             { // KeySchemaElement
-              AttributeName: "messageCid", // required
-              KeyType: "RANGE", // required
+              AttributeName : 'messageCid', // required
+              KeyType       : 'RANGE', // required
             } as KeySchemaElement,
           ],
           GlobalSecondaryIndexes: [
             {
-                IndexName: "watermark",
-                KeySchema: [
-                    { AttributeName: "tenant", KeyType: 'HASH' } as KeySchemaElement, // GSI partition key
-                    { AttributeName: "watermark", KeyType: 'RANGE' } as KeySchemaElement // Optional GSI sort key
-                ],
-                Projection: {
-                    ProjectionType: 'ALL' // Adjust as needed ('ALL', 'KEYS_ONLY', 'INCLUDE')
-                }
+              IndexName : 'watermark',
+              KeySchema : [
+                    { AttributeName: 'tenant', KeyType: 'HASH' } as KeySchemaElement, // GSI partition key
+                    { AttributeName: 'watermark', KeyType: 'RANGE' } as KeySchemaElement // Optional GSI sort key
+              ],
+              Projection: {
+                ProjectionType: 'ALL' // Adjust as needed ('ALL', 'KEYS_ONLY', 'INCLUDE')
+              }
             } as GlobalSecondaryIndex
           ],
-          BillingMode: "PAY_PER_REQUEST" as BillingMode,
-          TableClass: "STANDARD" as TableClass,
+          BillingMode : 'PAY_PER_REQUEST' as BillingMode,
+          TableClass  : 'STANDARD' as TableClass,
         };
 
         const createTableCommand = new CreateTableCommand(createTableInput);
@@ -132,39 +132,39 @@ export class EventLogNoSql implements EventLog {
     // Step 1: Increment the counter atomically
     try {
       const counterParams = {
-        TableName: this.#tableName,
-        Key: { "tenant": { S: tenant + "_counter"}, "messageCid": { S: "counter" } }, // Replace 'itemCounter' with your actual counter key
-        UpdateExpression: 'SET #count = if_not_exists(#count, :start) + :incr',
-        ExpressionAttributeNames: { '#count': 'count' },
-        ExpressionAttributeValues: {
-            ':incr': { N: '1' }, // Increment value
-            ':start': { N: '0' } // Initial value if 'count' does not exist
+        TableName                 : this.#tableName,
+        Key                       : { 'tenant': { S: tenant + '_counter'}, 'messageCid': { S: 'counter' } }, // Replace 'itemCounter' with your actual counter key
+        UpdateExpression          : 'SET #count = if_not_exists(#count, :start) + :incr',
+        ExpressionAttributeNames  : { '#count': 'count' },
+        ExpressionAttributeValues : {
+          ':incr'  : { N: '1' }, // Increment value
+          ':start' : { N: '0' } // Initial value if 'count' does not exist
         },
         ReturnValues: 'UPDATED_NEW' as ReturnValue
       };
-  
+
       const updateCommand = new UpdateItemCommand(counterParams);
       const updateResult = await this.#client.send(updateCommand);
-      const incNumber: string = updateResult.Attributes?.["count"]?.N ?? "";
+      const incNumber: string = updateResult.Attributes?.['count']?.N ?? '';
       const incrementedCounter = parseInt(incNumber, 10);
       const { indexes: putIndexes, tags } = extractTagsAndSanitizeIndexes(indexes);
       const fixIndexes = replaceReservedWords(putIndexes);
       const input = {
-        "Item": {
-          "tenant": {
-            "S": tenant
+        'Item': {
+          'tenant': {
+            'S': tenant
           },
-          "messageCid": {
-            "S": messageCid
+          'messageCid': {
+            'S': messageCid
           },
           ...marshall(tags),
           ...marshall(fixIndexes),
-          "watermark": { N: incrementedCounter.toString() }
+          'watermark': { N: incrementedCounter.toString() }
         },
-        "TableName": this.#tableName
+        'TableName': this.#tableName
       };
 
-      
+
       const command = new PutItemCommand(input);
       await this.#client.send(command);
     } catch ( error ) {
@@ -177,10 +177,10 @@ export class EventLogNoSql implements EventLog {
   //   if (typeof obj !== 'object' || obj === null) {
   //       return obj; // Base case: return non-object values as-is
   //   }
-    
+
   //   // Initialize an empty object to store the modified properties
   //   const newObj = {};
-    
+
   //   // Iterate over each key-value pair in the object
   //   for (let key in obj) {
   //       if (obj.hasOwnProperty(key)) {
@@ -194,7 +194,7 @@ export class EventLogNoSql implements EventLog {
   //           }
   //       }
   //   }
-    
+
   //   return newObj;
   // }
 
@@ -231,53 +231,53 @@ export class EventLogNoSql implements EventLog {
 
       for (const filter of filters) {
         const constructFilter = {
-          FilterExpression: "",
-        }
+          FilterExpression: '',
+        };
         const conditions: string[] = [];
         for ( const keyRaw in filter ) {
           // schema and method are reserved keywords so we replace them here
-          const key = keyRaw == "schema" ? "xschema" : keyRaw == "method" ? "xmethod" : keyRaw;
+          const key = keyRaw == 'schema' ? 'xschema' : keyRaw == 'method' ? 'xmethod' : keyRaw;
           constructFilter.FilterExpression += key;
           const value = filter[key];
           if (typeof value === 'object') {
-            if (value["gt"]) {
-              conditions.push(key + " > :x" + key + "GT");
-              expressionAttributeValues[":x" + key + "GT"] = value["gt"]
+            if (value['gt']) {
+              conditions.push(key + ' > :x' + key + 'GT');
+              expressionAttributeValues[':x' + key + 'GT'] = value['gt'];
             }
-            if (value["gte"]) {
-              conditions.push(key + " >= :x" + key + "GTE");
-              expressionAttributeValues[":x" + key + "GTE"] = value["gte"]
+            if (value['gte']) {
+              conditions.push(key + ' >= :x' + key + 'GTE');
+              expressionAttributeValues[':x' + key + 'GTE'] = value['gte'];
             }
-            if (value["lt"]) {
-              conditions.push(key + " < :x" + key + "LT");
-              expressionAttributeValues[":x" + key + "LT"] = value["lt"]
+            if (value['lt']) {
+              conditions.push(key + ' < :x' + key + 'LT');
+              expressionAttributeValues[':x' + key + 'LT'] = value['lt'];
             }
-            if (value["lte"]) {
-              conditions.push(key + " <= :x" + key + "LTE");
-              expressionAttributeValues[":x" + key + "LTE"] = value["lte"]
+            if (value['lte']) {
+              conditions.push(key + ' <= :x' + key + 'LTE');
+              expressionAttributeValues[':x' + key + 'LTE'] = value['lte'];
             }
           } else {
-            conditions.push(key + " = :x" + key + "EQ");
-            expressionAttributeValues[":x" + key + "EQ"] = filter[keyRaw].toString();
+            conditions.push(key + ' = :x' + key + 'EQ');
+            expressionAttributeValues[':x' + key + 'EQ'] = filter[keyRaw].toString();
           }
         }
-        filterDynamoDB.push("(" + conditions.join(" AND ") + ")");
+        filterDynamoDB.push('(' + conditions.join(' AND ') + ')');
       }
 
       expressionAttributeValues[':tenant'] = tenant;
 
 
-      const filterExp = filterDynamoDB.join(" OR ");
+      const filterExp = filterDynamoDB.join(' OR ');
 
       const params: QueryCommandInput = {
-        TableName: this.#tableName,
-        IndexName: "watermark",
-        KeyConditionExpression: '#tenant = :tenant',
-        ExpressionAttributeNames: {
-            '#tenant': "tenant"
+        TableName                : this.#tableName,
+        IndexName                : 'watermark',
+        KeyConditionExpression   : '#tenant = :tenant',
+        ExpressionAttributeNames : {
+          '#tenant': 'tenant'
         },
-        ExpressionAttributeValues: marshall(expressionAttributeValues),
-        ScanIndexForward: true,
+        ExpressionAttributeValues : marshall(expressionAttributeValues),
+        ScanIndexForward          : true,
       };
 
       if ( filterExp ) {
@@ -285,7 +285,7 @@ export class EventLogNoSql implements EventLog {
       }
 
       if ( cursor ) {
-        params["ExclusiveStartKey"] = JSON.parse(cursor.messageCid);
+        params['ExclusiveStartKey'] = JSON.parse(cursor.messageCid);
       }
 
 
@@ -297,15 +297,15 @@ export class EventLogNoSql implements EventLog {
         const lastMessage: any = data.Items.at(-1);
         const cursorValue = {};
         if ( lastMessage !== undefined ) {
-          cursorValue["tenant"] = lastMessage["tenant"];
-          cursorValue["messageCid"] = lastMessage["messageCid"];
-          cursorValue["watermark"] = lastMessage["watermark"];
+          cursorValue['tenant'] = lastMessage['tenant'];
+          cursorValue['messageCid'] = lastMessage['messageCid'];
+          cursorValue['watermark'] = lastMessage['watermark'];
           cursor = { messageCid: JSON.stringify(cursorValue), value: JSON.stringify(cursorValue) };
         }
-        
+
 
         for (let { messageCid, watermark } of data.Items) {
-            events.push(messageCid?.S ?? "");
+          events.push(messageCid?.S ?? '');
         }
         return { events, cursor };
       }
@@ -315,7 +315,7 @@ export class EventLogNoSql implements EventLog {
     }
 
     // return { events, cursor: returnCursor };
-    return { events: [], cursor: {messageCid: "123", value: 1} };
+    return { events: [], cursor: {messageCid: '123', value: 1} };
   }
 
   async deleteEventsByCid(
@@ -336,10 +336,10 @@ export class EventLogNoSql implements EventLog {
     ];
 
     for ( const messageCid of messageCids ) {
-      keysToDelete.push( { "tenant": { S: tenant}, "messageCid": { S: messageCid} } );
+      keysToDelete.push( { 'tenant': { S: tenant}, 'messageCid': { S: messageCid} } );
     }
 
-    await this.deleteItems(keysToDelete)
+    await this.deleteItems(keysToDelete);
 
   }
 
@@ -350,33 +350,33 @@ export class EventLogNoSql implements EventLog {
     const batches: BatchWriteItemCommandInput[] = [];
 
     for (let i = 0; i < keysToDelete.length; i += batchSize) {
-        const batchKeys = keysToDelete.slice(i, i + batchSize);
+      const batchKeys = keysToDelete.slice(i, i + batchSize);
 
-        const deleteRequests = batchKeys.map(key => ({
-            DeleteRequest: {
-                Key: key
-            }
-        }));
+      const deleteRequests = batchKeys.map(key => ({
+        DeleteRequest: {
+          Key: key
+        }
+      }));
 
-        batches.push({
-            RequestItems: {
-                [this.#tableName]: deleteRequests
-            }
-        });
+      batches.push({
+        RequestItems: {
+          [this.#tableName]: deleteRequests
+        }
+      });
     }
 
     // Execute batches using batchWriteItem
     for (const batch of batches) {
       const command = new BatchWriteItemCommand(batch);
       try {
-        
-          const response = await this.#client.send(command);
+
+        const response = await this.#client.send(command);
       } catch (error) {
-          console.error('Error deleting batch:', error);
-          // Handle error as needed
+        console.error('Error deleting batch:', error);
+        // Handle error as needed
       }
     }
-}
+  }
 
   async clear(): Promise<void> {
     if (!this.#client) {
@@ -387,35 +387,35 @@ export class EventLogNoSql implements EventLog {
 
     try {
       let scanParams: ScanCommandInput = {
-          TableName: this.#tableName
+        TableName: this.#tableName
       };
 
       let scanCommand = new ScanCommand(scanParams);
       let scanResult;
-      
+
       do {
-          scanResult = await this.#client.send(scanCommand);
+        scanResult = await this.#client.send(scanCommand);
 
-          // Delete each item
-          for (let item of scanResult.Items) {
-              let deleteParams = {
-                  TableName: this.#tableName,
-                  Key: {
-                      'tenant': { S: item.tenant.S.toString() }, // Adjust 'primaryKey' based on your table's partition key
-                      'messageCid': { S: item.messageCid.S.toString() }
-                  }
-              };
-              let deleteCommand = new DeleteItemCommand(deleteParams);
-              await this.#client.send(deleteCommand);
-          }
+        // Delete each item
+        for (let item of scanResult.Items) {
+          let deleteParams = {
+            TableName : this.#tableName,
+            Key       : {
+              'tenant'     : { S: item.tenant.S.toString() }, // Adjust 'primaryKey' based on your table's partition key
+              'messageCid' : { S: item.messageCid.S.toString() }
+            }
+          };
+          let deleteCommand = new DeleteItemCommand(deleteParams);
+          await this.#client.send(deleteCommand);
+        }
 
-          // Continue scanning if we have more items
-          scanParams.ExclusiveStartKey = scanResult.LastEvaluatedKey;
+        // Continue scanning if we have more items
+        scanParams.ExclusiveStartKey = scanResult.LastEvaluatedKey;
 
       } while (scanResult.LastEvaluatedKey);
 
     } catch (err) {
-        console.error('Unable to clear table:', err);
+      console.error('Unable to clear table:', err);
     }
   }
 }

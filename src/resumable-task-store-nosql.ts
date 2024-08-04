@@ -1,6 +1,6 @@
 import { DwnDatabaseType } from './types.js';
 import { Dialect } from './dialect/dialect.js';
-import { 
+import {
   DynamoDBClient,
   ListTablesCommand,
   CreateTableCommand,
@@ -19,24 +19,24 @@ import {
 } from '@aws-sdk/client-dynamodb';
 import {
   marshall
-} from '@aws-sdk/util-dynamodb'
+} from '@aws-sdk/util-dynamodb';
 import { Cid, ManagedResumableTask, ResumableTaskStore } from '@tbd54566975/dwn-sdk-js';
 
 export class ResumableTaskStoreNoSql implements ResumableTaskStore {
-  #tableName: string = "resumableTasks";
-  #tenantid: string = "default"; // Used as a hash key for when we need to query based on timeout
+  #tableName = 'resumableTasks';
+  #tenantid = 'default'; // Used as a hash key for when we need to query based on timeout
   private static readonly taskTimeoutInSeconds = 60;
 
   #client: DynamoDBClient;
-  
+
   constructor(dialect: Dialect) {
-    if ( process.env.IS_OFFLINE == "true" ) {
+    if ( process.env.IS_OFFLINE == 'true' ) {
       this.#client = new DynamoDBClient({
-        region: 'localhost',
-        endpoint: 'http://0.0.0.0:8006',
-        credentials: {
-          accessKeyId: 'MockAccessKeyId',
-          secretAccessKey: 'MockSecretAccessKey'
+        region      : 'localhost',
+        endpoint    : 'http://0.0.0.0:8006',
+        credentials : {
+          accessKeyId     : 'MockAccessKeyId',
+          secretAccessKey : 'MockSecretAccessKey'
         },
       });
     } else {
@@ -55,7 +55,7 @@ export class ResumableTaskStoreNoSql implements ResumableTaskStore {
     // Does table already exist?
     if ( response.TableNames ) {
 
-      const tableExists = response.TableNames?.length > 0 && response.TableNames?.indexOf(this.#tableName) !== -1
+      const tableExists = response.TableNames?.length > 0 && response.TableNames?.indexOf(this.#tableName) !== -1;
       if ( tableExists ) {
         return;
       }
@@ -65,39 +65,39 @@ export class ResumableTaskStoreNoSql implements ResumableTaskStore {
     const createTableInput = { // CreateTableInput
       AttributeDefinitions: [ // AttributeDefinitions // required
         { // AttributeDefinition
-          AttributeName: "tenantid", // required
-          AttributeType: "S", // required
+          AttributeName : 'tenantid', // required
+          AttributeType : 'S', // required
         } as AttributeDefinition,
         { // AttributeDefinition
-          AttributeName: "taskid", // required
-          AttributeType: "S", // required
+          AttributeName : 'taskid', // required
+          AttributeType : 'S', // required
         } as AttributeDefinition,
         { // AttributeDefinition
-          AttributeName: "timeout", // required
-          AttributeType: "N", // required
+          AttributeName : 'timeout', // required
+          AttributeType : 'N', // required
         } as AttributeDefinition,
       ],
-      TableName: this.#tableName, // required
-      KeySchema: [ // KeySchema // required
+      TableName : this.#tableName, // required
+      KeySchema : [ // KeySchema // required
         { // KeySchemaElement
-          AttributeName: "taskid", // required
-          KeyType: "HASH", // required
+          AttributeName : 'taskid', // required
+          KeyType       : 'HASH', // required
         } as KeySchemaElement,
       ],
       GlobalSecondaryIndexes: [
         {
-            IndexName: "timeout",
-            KeySchema: [
-                { AttributeName: "tenantid", KeyType: 'HASH' } as KeySchemaElement, // GSI partition key
-                { AttributeName: "timeout", KeyType: 'RANGE' } as KeySchemaElement // Optional GSI sort key
-            ],
-            Projection: {
-                ProjectionType: 'ALL' // Adjust as needed ('ALL', 'KEYS_ONLY', 'INCLUDE')
-            }
+          IndexName : 'timeout',
+          KeySchema : [
+                { AttributeName: 'tenantid', KeyType: 'HASH' } as KeySchemaElement, // GSI partition key
+                { AttributeName: 'timeout', KeyType: 'RANGE' } as KeySchemaElement // Optional GSI sort key
+          ],
+          Projection: {
+            ProjectionType: 'ALL' // Adjust as needed ('ALL', 'KEYS_ONLY', 'INCLUDE')
+          }
         } as GlobalSecondaryIndex
       ],
-      BillingMode: "PAY_PER_REQUEST" as BillingMode,
-      TableClass: "STANDARD" as TableClass,
+      BillingMode : 'PAY_PER_REQUEST' as BillingMode,
+      TableClass  : 'STANDARD' as TableClass,
     };
 
     const createTableCommand = new CreateTableCommand(createTableInput);
@@ -107,7 +107,7 @@ export class ResumableTaskStoreNoSql implements ResumableTaskStore {
     } catch ( error ) {
       console.error(error);
     }
-    
+
   }
 
   async close(): Promise<void> {
@@ -126,24 +126,24 @@ export class ResumableTaskStoreNoSql implements ResumableTaskStore {
     //const taskEntryInDatabase: ManagedResumableTask = { id, task: taskString, timeout, retryCount };
 
     const input = {
-      "Item": {
-        "taskid": {
-          "S": id
+      'Item': {
+        'taskid': {
+          'S': id
         },
-        "tenantid": {
-          "S": this.#tenantid
+        'tenantid': {
+          'S': this.#tenantid
         },
-        "timeout": {
+        'timeout': {
           N: timeout.toString()
         },
-        "task": {
-          "S": taskString
+        'task': {
+          'S': taskString
         },
-        "retryCount": {
-          "S": retryCount.toString()
+        'retryCount': {
+          'S': retryCount.toString()
         }
       },
-      "TableName": this.#tableName
+      'TableName': this.#tableName
     };
     const command = new PutItemCommand(input);
     await this.#client.send(command);
@@ -166,19 +166,19 @@ export class ResumableTaskStoreNoSql implements ResumableTaskStore {
       const newTimeout = now + (ResumableTaskStoreNoSql.taskTimeoutInSeconds * 1000);
 
       const params: QueryCommandInput = {
-        TableName: this.#tableName,
-        IndexName: "timeout",
-        KeyConditionExpression: '#tenantid = :tenantid AND #timeout <= :timeout',
-        ExpressionAttributeNames: {
-            "#tenantid": "tenantid",
-            "#timeout": "timeout"
+        TableName                : this.#tableName,
+        IndexName                : 'timeout',
+        KeyConditionExpression   : '#tenantid = :tenantid AND #timeout <= :timeout',
+        ExpressionAttributeNames : {
+          '#tenantid' : 'tenantid',
+          '#timeout'  : 'timeout'
         },
         ExpressionAttributeValues: marshall({
-          ":tenantid": this.#tenantid,
-          ":timeout": now
+          ':tenantid' : this.#tenantid,
+          ':timeout'  : now
         }),
-        ScanIndexForward: true,
-        Limit: count
+        ScanIndexForward : true,
+        Limit            : count
       };
 
       const command = new QueryCommand(params);
@@ -190,18 +190,18 @@ export class ResumableTaskStoreNoSql implements ResumableTaskStore {
             await this.delete(item.taskid.S);
             // recreate object with updated value
             const input = {
-              "Item": {
-                "taskid": item.taskid,
-                "tenantid": {
-                  "S": this.#tenantid
+              'Item': {
+                'taskid'   : item.taskid,
+                'tenantid' : {
+                  'S': this.#tenantid
                 },
-                "timeout": {
+                'timeout': {
                   N: newTimeout.toString()
                 },
-                "task": item.task,
-                "retryCount": item.retryCount
+                'task'       : item.task,
+                'retryCount' : item.retryCount
               },
-              "TableName": this.#tableName
+              'TableName': this.#tableName
             };
             const command = new PutItemCommand(input);
             await this.#client.send(command);
@@ -211,9 +211,9 @@ export class ResumableTaskStoreNoSql implements ResumableTaskStore {
 
       const tasksToReturn = data.Items?.map((task) => {
         return {
-          id         : task.taskid.S ?? "",
-          task       : JSON.parse(task.task.S ?? "{}"),
-          retryCount : parseInt(task.retryCount.N ?? "0"),
+          id         : task.taskid.S ?? '',
+          task       : JSON.parse(task.task.S ?? '{}'),
+          retryCount : parseInt(task.retryCount.N ?? '0'),
           timeout    : newTimeout,
         };
       });
@@ -232,14 +232,14 @@ export class ResumableTaskStoreNoSql implements ResumableTaskStore {
     }
 
     const input = { // GetItemInput
-      TableName: this.#tableName, // required
-      Key: { // Key // required
-        "taskid": { // AttributeValue Union: only one key present
+      TableName : this.#tableName, // required
+      Key       : { // Key // required
+        'taskid': { // AttributeValue Union: only one key present
           S: taskId,
         }
       },
       AttributesToGet: [ // AttributeNameList
-        "taskid", "task", "timeout", "retryCount"
+        'taskid', 'task', 'timeout', 'retryCount'
       ]
     };
     const command = new GetItemCommand(input);
@@ -249,11 +249,11 @@ export class ResumableTaskStoreNoSql implements ResumableTaskStore {
       return undefined;
     }
     return {
-        id: response.Item.taskid.S ?? "",
-        task: response.Item.task.S ?? "",
-        timeout: parseInt(response.Item.timeout.N ?? "0"),
-        retryCount: parseInt(response.Item.retryCount.N ?? "0")
-    }
+      id         : response.Item.taskid.S ?? '',
+      task       : response.Item.task.S ?? '',
+      timeout    : parseInt(response.Item.timeout.N ?? '0'),
+      retryCount : parseInt(response.Item.retryCount.N ?? '0')
+    };
   }
 
   async extend(taskId: string, timeoutInSeconds: number): Promise<void> {
@@ -265,9 +265,9 @@ export class ResumableTaskStoreNoSql implements ResumableTaskStore {
       const timeout = Date.now() + (timeoutInSeconds * 1000);
 
       const input = { // GetItemInput
-        TableName: this.#tableName, // required
-        Key: { // Key // required
-          "taskid": { // AttributeValue Union: only one key present
+        TableName : this.#tableName, // required
+        Key       : { // Key // required
+          'taskid': { // AttributeValue Union: only one key present
             S: taskId,
           }
         }
@@ -281,21 +281,21 @@ export class ResumableTaskStoreNoSql implements ResumableTaskStore {
 
       response.Item.timeout = {
         N: timeout.toString()
-      }
+      };
 
       const inputRecreate = {
-        "Item": {
-          "taskid": response.Item.taskid,
-          "tenantid": {
-            "S": this.#tenantid
+        'Item': {
+          'taskid'   : response.Item.taskid,
+          'tenantid' : {
+            'S': this.#tenantid
           },
-          "timeout": {
+          'timeout': {
             N: timeout.toString()
           },
-          "task": response.Item.task,
-          "retryCount": response.Item.retryCount
+          'task'       : response.Item.task,
+          'retryCount' : response.Item.retryCount
         },
-        "TableName": this.#tableName
+        'TableName': this.#tableName
       };
       const commandInput = new PutItemCommand(inputRecreate);
       await this.#client.send(commandInput);
@@ -309,12 +309,12 @@ export class ResumableTaskStoreNoSql implements ResumableTaskStore {
     }
 
     let deleteParams = {
-      TableName: this.#tableName,
-      Key: marshall({
-          'taskid': taskId, // Adjust 'primaryKey' based on your table's partition key
+      TableName : this.#tableName,
+      Key       : marshall({
+        'taskid': taskId, // Adjust 'primaryKey' based on your table's partition key
       })
     };
-    
+
     let deleteCommand = new DeleteItemCommand(deleteParams);
     await this.#client.send(deleteCommand);
   }
@@ -326,35 +326,35 @@ export class ResumableTaskStoreNoSql implements ResumableTaskStore {
 
     try {
       let scanParams: ScanCommandInput = {
-          TableName: this.#tableName
+        TableName: this.#tableName
       };
 
       let scanCommand = new ScanCommand(scanParams);
       let scanResult;
-      
+
       do {
-          scanResult = await this.#client.send(scanCommand);
+        scanResult = await this.#client.send(scanCommand);
 
-          // Delete each item
-          for (let item of scanResult.Items) {
-              let deleteParams = {
-                  TableName: this.#tableName,
-                  Key: marshall({
-                      'taskid': item.taskid.S.toString()
-                  })
-              };
-              
-              let deleteCommand = new DeleteItemCommand(deleteParams);
-              await this.#client.send(deleteCommand);
-          }
+        // Delete each item
+        for (let item of scanResult.Items) {
+          let deleteParams = {
+            TableName : this.#tableName,
+            Key       : marshall({
+              'taskid': item.taskid.S.toString()
+            })
+          };
 
-          // Continue scanning if we have more items
-          scanParams.ExclusiveStartKey = scanResult.LastEvaluatedKey;
+          let deleteCommand = new DeleteItemCommand(deleteParams);
+          await this.#client.send(deleteCommand);
+        }
+
+        // Continue scanning if we have more items
+        scanParams.ExclusiveStartKey = scanResult.LastEvaluatedKey;
 
       } while (scanResult.LastEvaluatedKey);
 
     } catch (err) {
-        console.error('Unable to clear table:', err);
+      console.error('Unable to clear table:', err);
     }
   }
 }

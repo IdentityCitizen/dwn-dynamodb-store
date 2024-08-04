@@ -1,7 +1,7 @@
 import { DataStore, DataStream, DataStoreGetResult, DataStorePutResult } from '@tbd54566975/dwn-sdk-js';
 import { Readable } from 'readable-stream';
 import { Dialect } from './dialect/dialect.js';
-import { 
+import {
   DynamoDBClient,
   ListTablesCommand,
   CreateTableCommand,
@@ -17,21 +17,21 @@ import {
 } from '@aws-sdk/client-dynamodb';
 import {
   marshall
-} from '@aws-sdk/util-dynamodb'
+} from '@aws-sdk/util-dynamodb';
 
 export class DataStoreNoSql implements DataStore {
 
   #client: DynamoDBClient;
-  #tableName = "dataStore";
+  #tableName = 'dataStore';
 
   constructor(dialect: Dialect) {
-    if ( process.env.IS_OFFLINE == "true" ) {
+    if ( process.env.IS_OFFLINE == 'true' ) {
       this.#client = new DynamoDBClient({
-        region: 'localhost',
-        endpoint: 'http://0.0.0.0:8006',
-        credentials: {
-          accessKeyId: 'MockAccessKeyId',
-          secretAccessKey: 'MockSecretAccessKey'
+        region      : 'localhost',
+        endpoint    : 'http://0.0.0.0:8006',
+        credentials : {
+          accessKeyId     : 'MockAccessKeyId',
+          secretAccessKey : 'MockSecretAccessKey'
         },
       });
     } else {
@@ -49,7 +49,7 @@ export class DataStoreNoSql implements DataStore {
 
     // Does table already exist?
     if ( response.TableNames ) {
-      const tableExists = response.TableNames?.length > 0 && response.TableNames?.indexOf(this.#tableName) !== -1
+      const tableExists = response.TableNames?.length > 0 && response.TableNames?.indexOf(this.#tableName) !== -1;
       if ( tableExists ) {
         return;
       }
@@ -59,27 +59,27 @@ export class DataStoreNoSql implements DataStore {
     const createTableInput = { // CreateTableInput
       AttributeDefinitions: [ // AttributeDefinitions // required
         { // AttributeDefinition
-          AttributeName: "tenant", // required
-          AttributeType: "S", // required
+          AttributeName : 'tenant', // required
+          AttributeType : 'S', // required
         } as AttributeDefinition,
         { // AttributeDefinition
-          AttributeName: "recordIdDataCid", // required
-          AttributeType: "S", // required
+          AttributeName : 'recordIdDataCid', // required
+          AttributeType : 'S', // required
         } as AttributeDefinition
       ],
-      TableName: this.#tableName, // required
-      KeySchema: [ // KeySchema // required
+      TableName : this.#tableName, // required
+      KeySchema : [ // KeySchema // required
         { // KeySchemaElement
-          AttributeName: "tenant", // required
-          KeyType: "HASH", // required
+          AttributeName : 'tenant', // required
+          KeyType       : 'HASH', // required
         } as KeySchemaElement,
         { // KeySchemaElement
-          AttributeName: "recordIdDataCid", // required
-          KeyType: "RANGE", // required
+          AttributeName : 'recordIdDataCid', // required
+          KeyType       : 'RANGE', // required
         } as KeySchemaElement,
       ],
-      BillingMode: "PAY_PER_REQUEST" as BillingMode,
-      TableClass: "STANDARD" as TableClass,
+      BillingMode : 'PAY_PER_REQUEST' as BillingMode,
+      TableClass  : 'STANDARD' as TableClass,
     };
 
     const createTableCommand = new CreateTableCommand(createTableInput);
@@ -107,33 +107,33 @@ export class DataStoreNoSql implements DataStore {
     }
 
     const input = { // GetItemInput
-      TableName: this.#tableName, // required
-      Key: { // Key // required
-        "tenant": { // AttributeValue Union: only one key present
+      TableName : this.#tableName, // required
+      Key       : { // Key // required
+        'tenant': { // AttributeValue Union: only one key present
           S: tenant,
         },
-        "recordIdDataCid": {
-          S: recordId + "|" + dataCid
+        'recordIdDataCid': {
+          S: recordId + '|' + dataCid
         }
       },
       AttributesToGet: [ // AttributeNameList
-        "tenant", "recordId", "dataCid", "data"
+        'tenant', 'recordId', 'dataCid', 'data'
       ]
     };
     const command = new GetItemCommand(input);
     const response = await this.#client.send(command);
-    response.Item
+    response.Item;
 
     if ( !response.Item ) {
       return undefined;
     }
 
     const result = {
-        recordId: response.Item.recordId.S?.toString(),
-        tenant: response.Item.tenant.S?.toString(),
-        dataCid: response.Item.dataCid.S?.toString(),
-        data: response.Item.data.B
-    }
+      recordId : response.Item.recordId.S?.toString(),
+      tenant   : response.Item.tenant.S?.toString(),
+      dataCid  : response.Item.dataCid.S?.toString(),
+      data     : response.Item.data.B
+    };
 
     return {
       dataSize   : result.data ? result.data.length : 0,
@@ -157,24 +157,24 @@ export class DataStoreNoSql implements DataStore {
     const data = Buffer.from(bytes);
 
     const input = {
-      "Item": {
-        "tenant": {
-          "S": tenant
+      'Item': {
+        'tenant': {
+          'S': tenant
         },
-        "recordId": {
-          "S": recordId
+        'recordId': {
+          'S': recordId
         },
-        "dataCid": {
-          "S": dataCid
+        'dataCid': {
+          'S': dataCid
         },
-        "recordIdDataCid": {
-          "S": recordId + "|" + dataCid
+        'recordIdDataCid': {
+          'S': recordId + '|' + dataCid
         },
-        "data": {
-          "B": data
+        'data': {
+          'B': data
         }
       },
-      "TableName": this.#tableName
+      'TableName': this.#tableName
     };
     const command = new PutItemCommand(input);
     await this.#client.send(command);
@@ -196,13 +196,13 @@ export class DataStoreNoSql implements DataStore {
     }
 
     let deleteParams = {
-      TableName: this.#tableName,
-      Key: marshall({
-          'tenant': tenant, // Adjust 'primaryKey' based on your table's partition key
-          'recordIdDataCid': recordId + "|" + dataCid
+      TableName : this.#tableName,
+      Key       : marshall({
+        'tenant'          : tenant, // Adjust 'primaryKey' based on your table's partition key
+        'recordIdDataCid' : recordId + '|' + dataCid
       })
     };
-    
+
     let deleteCommand = new DeleteItemCommand(deleteParams);
     await this.#client.send(deleteCommand);
   }
@@ -216,36 +216,36 @@ export class DataStoreNoSql implements DataStore {
 
     try {
       let scanParams: ScanCommandInput = {
-          TableName: this.#tableName
+        TableName: this.#tableName
       };
 
       let scanCommand = new ScanCommand(scanParams);
       let scanResult;
-      
+
       do {
-          scanResult = await this.#client.send(scanCommand);
+        scanResult = await this.#client.send(scanCommand);
 
-          // Delete each item
-          for (let item of scanResult.Items) {
-              let deleteParams = {
-                  TableName: this.#tableName,
-                  Key: marshall({
-                      'tenant': item.tenant.S.toString(), // Adjust 'primaryKey' based on your table's partition key
-                      'recordIdDataCid': item.recordIdDataCid.S.toString()
-                  })
-              };
-              
-              let deleteCommand = new DeleteItemCommand(deleteParams);
-              await this.#client.send(deleteCommand);
-          }
+        // Delete each item
+        for (let item of scanResult.Items) {
+          let deleteParams = {
+            TableName : this.#tableName,
+            Key       : marshall({
+              'tenant'          : item.tenant.S.toString(), // Adjust 'primaryKey' based on your table's partition key
+              'recordIdDataCid' : item.recordIdDataCid.S.toString()
+            })
+          };
 
-          // Continue scanning if we have more items
-          scanParams.ExclusiveStartKey = scanResult.LastEvaluatedKey;
+          let deleteCommand = new DeleteItemCommand(deleteParams);
+          await this.#client.send(deleteCommand);
+        }
+
+        // Continue scanning if we have more items
+        scanParams.ExclusiveStartKey = scanResult.LastEvaluatedKey;
 
       } while (scanResult.LastEvaluatedKey);
 
     } catch (err) {
-        console.error('Unable to clear table:', err);
+      console.error('Unable to clear table:', err);
     }
   }
 
