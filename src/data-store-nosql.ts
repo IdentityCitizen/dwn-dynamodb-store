@@ -36,7 +36,7 @@ export class DataStoreNoSql implements DataStore {
       });
     } else {
       this.#client = new DynamoDBClient({
-        region: 'ap-southeast-2'
+        region: process.env.AWS_REGION ? process.env.AWS_REGION : 'ap-southeast-2'
       });
     }
   }

@@ -30,6 +30,7 @@ npm install @tbd54566975/dwn-dynamodb-store
 # Considerations
 
 - Since DynamoDB is an AWS hosted service, factor latency into your application requirements. Use the `REGION` environment variable to use an AWS Region closest to where your application runs.
+- If you wish to run tests against a AWS hosted DynamoDB tables, the stores will create the tables in real time, however, the tables may not be ready for use for several minutes. You may need to run the test to create the tables, allow the first pass to fail, then attempt to run the test again after 10 minutes when the tables are ready for use.
 
 # Usage
 
