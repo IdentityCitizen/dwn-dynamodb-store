@@ -7,7 +7,7 @@ DynamoDB NoSQL backed implementations of DWN `MessageStore`, `DataStore`, `Event
 - [Installation](#installation)
 - [Considerations](#considerations)
 - [Usage](#usage)
-  - [PostgreSQL](#dynamodb)
+  - [DynamoDB](#dynamodb)
 - [Development](#development)
   - [Prerequisites](#prerequisites)
     - [`node` and `npm`](#node-and-npm)
