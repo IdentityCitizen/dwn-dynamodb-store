@@ -79,7 +79,8 @@ Once you have installed `nvm`, install the desired node version with `nvm instal
 0. clone the repo and `cd` into the project directory
 1. Install all project dependencies by running `npm install`
 2. Start the test databases using `./scripts/start-databases`
-3. Open a second terminal and run tests using `npm run test` (serverless struggles with daemons so it requires a dedicated terminal)
+3. Open a second terminal and run `export IS_OFFLINE=true` to run the tests against the offline DynamoDB database
+4. Run tests using `npm run test` (serverless struggles with daemons so it requires a dedicated terminal)
 
 `Ctrl+C` in the terminal where you started the database when tests have completed.
 
