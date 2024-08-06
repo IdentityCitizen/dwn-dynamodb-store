@@ -1,6 +1,5 @@
 import { DataStore, DataStream, DataStoreGetResult, DataStorePutResult } from '@tbd54566975/dwn-sdk-js';
 import { Readable } from 'readable-stream';
-import { Dialect } from './dialect/dialect.js';
 import {
   DynamoDBClient,
   ListTablesCommand,
@@ -24,7 +23,7 @@ export class DataStoreNoSql implements DataStore {
   #client: DynamoDBClient;
   #tableName = 'dataStore';
 
-  constructor(dialect: Dialect) {
+  constructor() {
     if ( process.env.IS_OFFLINE == 'true' ) {
       this.#client = new DynamoDBClient({
         region      : 'localhost',

@@ -3,7 +3,6 @@ import { DataStoreNoSql } from '../src/data-store-nosql.js';
 import { EventLogNoSql } from '../src/event-log-nosql.js';
 import { MessageStoreNoSql } from '../src/message-store-nosql.js';
 import { TestSuite } from '@tbd54566975/dwn-sdk-js/tests';
-import { testDynamoDBDialect } from './test-dialects.js';
 
 // Remove when we Node.js v18 is no longer supported by this project.
 // Node.js v18 maintenance begins 2023-10-18 and is EoL 2025-04-30: https://github.com/nodejs/release#release-schedule
@@ -15,10 +14,10 @@ describe('NoSQL Store Test Suite', () => {
 
   describe('DynamoDB Support', () => {
     TestSuite.runStoreDependentTests({
-      messageStore       : new MessageStoreNoSql(testDynamoDBDialect),
-      dataStore          : new DataStoreNoSql(testDynamoDBDialect),
-      eventLog           : new EventLogNoSql(testDynamoDBDialect),
-      resumableTaskStore : new ResumableTaskStoreNoSql(testDynamoDBDialect),
+      messageStore       : new MessageStoreNoSql(),
+      dataStore          : new DataStoreNoSql(),
+      eventLog           : new EventLogNoSql(),
+      resumableTaskStore : new ResumableTaskStoreNoSql(),
     });
   });
 

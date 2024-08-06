@@ -17,7 +17,7 @@ export function extractTagsAndSanitizeIndexes(records: KeyValues): {
     if (key.startsWith('tag.')) {
       let value = indexes[key];
       delete indexes[key];
-      tags[key.replace('\.', '')] = value;
+      tags[key.replace('.', '')] = value;
     }
   }
 
@@ -119,7 +119,7 @@ export function replaceReservedWords(obj) {
 
   // Iterate over each key-value pair in the object
   for (let key in obj) {
-    if (obj.hasOwnProperty(key)) {
+    if (Object.prototype.hasOwnProperty.call(obj, key)) {
       // Construct new key with prefix only for top-level keys to prevent reserved dynamodb attribute names
       if ( key == 'schema' ) {
         newObj['xschema'] = obj[key];

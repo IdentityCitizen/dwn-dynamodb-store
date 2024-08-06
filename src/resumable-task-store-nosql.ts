@@ -1,5 +1,4 @@
 import { DwnDatabaseType } from './types.js';
-import { Dialect } from './dialect/dialect.js';
 import {
   DynamoDBClient,
   ListTablesCommand,
@@ -29,7 +28,7 @@ export class ResumableTaskStoreNoSql implements ResumableTaskStore {
 
   #client: DynamoDBClient;
 
-  constructor(dialect: Dialect) {
+  constructor() {
     if ( process.env.IS_OFFLINE == 'true' ) {
       this.#client = new DynamoDBClient({
         region      : 'localhost',
@@ -257,50 +256,47 @@ export class ResumableTaskStoreNoSql implements ResumableTaskStore {
   }
 
   async extend(taskId: string, timeoutInSeconds: number): Promise<void> {
-    try {
-      if (!this.#client) {
-        throw new Error('Connection to database not open. Call `open` before using `extend`.');
-      }
-
-      const timeout = Date.now() + (timeoutInSeconds * 1000);
-
-      const input = { // GetItemInput
-        TableName : this.#tableName, // required
-        Key       : { // Key // required
-          'taskid': { // AttributeValue Union: only one key present
-            S: taskId,
-          }
-        }
-      };
-      const command = new GetItemCommand(input);
-      const response = await this.#client.send(command);
-
-      if ( !response.Item ) {
-        return;
-      }
-
-      response.Item.timeout = {
-        N: timeout.toString()
-      };
-
-      const inputRecreate = {
-        'Item': {
-          'taskid'   : response.Item.taskid,
-          'tenantid' : {
-            'S': this.#tenantid
-          },
-          'timeout': {
-            N: timeout.toString()
-          },
-          'task'       : response.Item.task,
-          'retryCount' : response.Item.retryCount
-        },
-        'TableName': this.#tableName
-      };
-      const commandInput = new PutItemCommand(inputRecreate);
-      await this.#client.send(commandInput);
-    } catch ( error ) {
+    if (!this.#client) {
+      throw new Error('Connection to database not open. Call `open` before using `extend`.');
     }
+
+    const timeout = Date.now() + (timeoutInSeconds * 1000);
+
+    const input = { // GetItemInput
+      TableName : this.#tableName, // required
+      Key       : { // Key // required
+        'taskid': { // AttributeValue Union: only one key present
+          S: taskId,
+        }
+      }
+    };
+    const command = new GetItemCommand(input);
+    const response = await this.#client.send(command);
+
+    if ( !response.Item ) {
+      return;
+    }
+
+    response.Item.timeout = {
+      N: timeout.toString()
+    };
+
+    const inputRecreate = {
+      'Item': {
+        'taskid'   : response.Item.taskid,
+        'tenantid' : {
+          'S': this.#tenantid
+        },
+        'timeout': {
+          N: timeout.toString()
+        },
+        'task'       : response.Item.task,
+        'retryCount' : response.Item.retryCount
+      },
+      'TableName': this.#tableName
+    };
+    const commandInput = new PutItemCommand(inputRecreate);
+    await this.#client.send(commandInput);
   }
 
   async delete(taskId: string): Promise<void> {

@@ -1,5 +1,4 @@
 import type { EventLog, Filter, PaginationCursor } from '@tbd54566975/dwn-sdk-js';
-import { Dialect } from './dialect/dialect.js';
 import { extractTagsAndSanitizeIndexes } from './utils/sanitize-events.js';
 import { replaceReservedWords } from './utils/sanitize.js';
 import {
@@ -30,7 +29,7 @@ export class EventLogNoSql implements EventLog {
   #tableName = 'eventLog';
   #client: DynamoDBClient;
 
-  constructor(dialect: Dialect) {
+  constructor() {
     if ( process.env.IS_OFFLINE == 'true' ) {
       this.#client = new DynamoDBClient({
         region      : 'localhost',
@@ -218,12 +217,6 @@ export class EventLogNoSql implements EventLog {
       );
     }
 
-    if ( filters ) {
-    }
-
-    if ( cursor ) {
-    }
-
     try {
 
       const filterDynamoDB: any = [];
@@ -304,9 +297,11 @@ export class EventLogNoSql implements EventLog {
         }
 
 
-        for (let { messageCid, watermark } of data.Items) {
+        for (let { messageCid } of data.Items) {
+          // Send empty string if messageCid.S is undefined
           events.push(messageCid?.S ?? '');
         }
+
         return { events, cursor };
       }
 
@@ -369,11 +364,9 @@ export class EventLogNoSql implements EventLog {
     for (const batch of batches) {
       const command = new BatchWriteItemCommand(batch);
       try {
-
-        const response = await this.#client.send(command);
+        await this.#client.send(command);
       } catch (error) {
         console.error('Error deleting batch:', error);
-        // Handle error as needed
       }
     }
   }

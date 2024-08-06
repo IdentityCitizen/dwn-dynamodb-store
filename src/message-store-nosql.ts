@@ -15,7 +15,6 @@ import {
 import { KeyValues } from './types.js';
 import * as block from 'multiformats/block';
 import * as cbor from '@ipld/dag-cbor';
-import { Dialect } from './dialect/dialect.js';
 import {
   DynamoDBClient,
   ListTablesCommand,
@@ -45,7 +44,7 @@ export class MessageStoreNoSql implements MessageStore {
   #tableName = 'messageStoreMessages';
   #client: DynamoDBClient;
 
-  constructor(dialect: Dialect) {
+  constructor() {
     if ( process.env.IS_OFFLINE == 'true' ) {
       this.#client = new DynamoDBClient({
         region      : 'localhost',
@@ -73,8 +72,7 @@ export class MessageStoreNoSql implements MessageStore {
     // Does table already exist?
     if ( response.TableNames ) {
       const tableExists = response.TableNames?.length > 0 && response.TableNames?.indexOf(this.#tableName) !== -1;
-      if ( tableExists ) {
-      } else {
+      if ( !tableExists ) {
         const createTableInput = { // CreateTableInput
           AttributeDefinitions: [ // AttributeDefinitions // required
             { // AttributeDefinition
@@ -148,7 +146,7 @@ export class MessageStoreNoSql implements MessageStore {
         const createTableCommand = new CreateTableCommand(createTableInput);
 
         try {
-          const createTableResponse = await this.#client.send(createTableCommand);
+          await this.#client.send(createTableCommand);
         } catch ( error ) {
           console.error(error);
         }
@@ -307,19 +305,12 @@ export class MessageStoreNoSql implements MessageStore {
     pagination?: Pagination,
     options?: MessageStoreOptions
   ): Promise<{ messages: GenericMessage[], cursor?: PaginationCursor}> {
-    if ( filters ) {
-    }
-
-    if ( pagination ) {
-    }
 
     if (!this.#client) {
       throw new Error(
         'Connection to database not open. Call `open` before using `query`.'
       );
     }
-
-    //await this.dumpAll();
 
     options?.signal?.throwIfAborted();
 
@@ -337,7 +328,7 @@ export class MessageStoreNoSql implements MessageStore {
         const conditions: string[] = [];
         for ( const keyRaw in filter ) {
           // "schema" and "method" are reserved keywords so we replace them here
-          const key = (keyRaw == 'schema' ? 'xschema' : keyRaw == 'method' ? 'xmethod' : keyRaw).replace('\.', '');
+          const key = (keyRaw == 'schema' ? 'xschema' : keyRaw == 'method' ? 'xmethod' : keyRaw).replace('.', '');
 
           constructFilter.FilterExpression += key;
           const value = filter[keyRaw];
@@ -385,12 +376,6 @@ export class MessageStoreNoSql implements MessageStore {
         options?.signal
       );
 
-      if( data.Items ) {
-        for( const item of data?.Items ) {
-        }
-      }
-
-
       delete params['Limit'];
 
       if ( data.ScannedCount !== undefined && data.Items !== undefined && data.ScannedCount > 0 && data.LastEvaluatedKey ) {
@@ -405,73 +390,8 @@ export class MessageStoreNoSql implements MessageStore {
         }
       }
 
-      await this.dumpAll();
-
       // Extract and return the items from the response
       if (data.Items) {
-
-        const filteredItems = data.Items.filter(item => {
-          let filterMatchCount = 0;
-          for (const filter of filters) {
-            let innerFilterMatch = true; // we'll set to false if it doesn't match
-            for ( const key in filter ){
-              const value = filter[key];
-              if (typeof value === 'object') {
-                let rangeCount = 0;
-                let matchCount = 0;
-                if (value['gt']) {
-                  rangeCount++;
-                  if (item.hasOwnProperty(key) ) {
-                    if ( item[key].S + '' > value['gt'] ) {
-                      matchCount++;
-                    }
-                  }
-                }
-                if (value['gte']) {
-                  rangeCount++;
-                  if (item.hasOwnProperty(key) ) {
-                    if ( item[key].S + '' >= value['gte'] ) {
-                      matchCount++;
-                    }
-                  }
-                }
-                if (value['lt']) {
-                  rangeCount++;
-                  if (item.hasOwnProperty(key) ) {
-                    if ( item[key].S + '' < value['lt'] ) {
-                      matchCount++;
-                    }
-                  }
-                }
-                if (value['lte']) {
-                  rangeCount++;
-                  if (item.hasOwnProperty(key) ) {
-                    if ( item[key].S + '' <= value['lte'] ) {
-                      matchCount++;
-                    }
-                  }
-                }
-                if( rangeCount > 0 && rangeCount !== matchCount ) {
-                  innerFilterMatch = false;
-                }
-              } else {
-                const expectedValue = filter[key].toString();
-                // Check if item attribute matches expected value
-                if (!item.hasOwnProperty(key) || item[key].S !== expectedValue) {
-                  innerFilterMatch = false; // Exclude item from filteredItems
-                }
-              }
-
-
-            }
-            // means all of the filter properties were met so we increment the filterMatchCount (indicating we had at least one match)
-            if ( innerFilterMatch ) {
-              filterMatchCount++;
-            }
-          }
-          return filterMatchCount > 0; // Include item in filteredItems
-        });
-
         const results = await this.processPaginationResults(data.Items, sortProperty, data.LastEvaluatedKey, pagination?.limit, options);
         return results;
       } else {
@@ -542,41 +462,6 @@ export class MessageStoreNoSql implements MessageStore {
 
           let deleteCommand = new DeleteItemCommand(deleteParams);
           await this.#client.send(deleteCommand);
-        }
-
-        // Continue scanning if we have more items
-        scanParams.ExclusiveStartKey = scanResult.LastEvaluatedKey;
-
-      } while (scanResult.LastEvaluatedKey);
-
-      // Since DynamoDB is eventual consistency, wait 5 seconds between calls
-      // await this.sleep(5000)
-
-    } catch (err) {
-      console.error('Unable to clear table:', err);
-    }
-  }
-
-
-  async dumpAll(): Promise<void> {
-    if (!this.#client) {
-      throw new Error(
-        'Connection to database not open. Call `open` before using `clear`.'
-      );
-    }
-
-    try {
-      let scanParams: ScanCommandInput = {
-        TableName: this.#tableName
-      };
-
-      let scanCommand = new ScanCommand(scanParams);
-      let scanResult;
-
-      do {
-        scanResult = await this.#client.send(scanCommand);
-        // Dump each item
-        for (let item of scanResult.Items) {
         }
 
         // Continue scanning if we have more items
@@ -685,37 +570,33 @@ export class MessageStoreNoSql implements MessageStore {
     sortDirection: SortDirection,
     filters: Filter[]
   ): any {
-    try {
-      const direction = sortDirection == SortDirection.Ascending ? true : false;
-      const params: QueryCommandInput = {
-        TableName                : this.#tableName,
-        KeyConditionExpression   : '#tenant = :tenant',
-        ExpressionAttributeNames : {
-          '#tenant': 'tenant' // Replace with your actual hash key attribute name
-        },
-        ExpressionAttributeValues: marshall({
-          ':tenant': tenant
-        }),
-        ScanIndexForward: direction,
+    const direction = sortDirection == SortDirection.Ascending ? true : false;
+    const params: QueryCommandInput = {
+      TableName                : this.#tableName,
+      KeyConditionExpression   : '#tenant = :tenant',
+      ExpressionAttributeNames : {
+        '#tenant': 'tenant' // Replace with your actual hash key attribute name
+      },
+      ExpressionAttributeValues: marshall({
+        ':tenant': tenant
+      }),
+      ScanIndexForward: direction,
 
-      };
+    };
 
-      if ( sortAttribute ) {
-        params['IndexName'] = sortAttribute;
-        if ( direction ) {
-          params['ScanIndexForward'] = direction;
-        }
+    if ( sortAttribute ) {
+      params['IndexName'] = sortAttribute;
+      if ( direction ) {
+        params['ScanIndexForward'] = direction;
       }
-
-      if ( pagination?.limit ) {
-        params['Limit'] = (pagination.limit * filters.length) + 1;
-      }
-      if ( pagination?.cursor ) {
-        params['ExclusiveStartKey'] = JSON.parse(pagination.cursor.messageCid);
-      }
-      return params;
-    } catch (error) {
-      throw error;
     }
+
+    if ( pagination?.limit ) {
+      params['Limit'] = (pagination.limit * filters.length) + 1;
+    }
+    if ( pagination?.cursor ) {
+      params['ExclusiveStartKey'] = JSON.parse(pagination.cursor.messageCid);
+    }
+    return params;
   }
 }
