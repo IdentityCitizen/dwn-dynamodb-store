@@ -40,13 +40,14 @@ npm install @tbd54566975/dwn-dynamodb-store
 import Database from 'better-sqlite3';
 
 import { Dwn } from '@tbd54566975/dwn-sdk-js'
-import { MessageStoreNoSql, DataStoreNoSql, EventLogNoSql } from '@tbd54566975/dwn-sql-store';
+import { MessageStoreNoSql, DataStoreNoSql, EventLogNoSql, ResumableTaskStoreNoSql } from '@tbd54566975/dwn-sql-store';
 
-const messageStore = new MessageStoreNoSql({});
-const dataStore = new DataStoreNoSql({});
-const eventLog = new EventLogNoSql({});
+const messageStore = new MessageStoreNoSql();
+const dataStore = new DataStoreNoSql();
+const eventLog = new EventLogNoSql();
+const resumableTaskStore = new ResumableTaskStoreNoSql();
 
-const dwn = await Dwn.create({ messageStore, dataStore, eventLog });
+const dwn = await Dwn.create({ messageStore, dataStore, eventLog, resumableTaskStore });
 ```
 
 # Development
