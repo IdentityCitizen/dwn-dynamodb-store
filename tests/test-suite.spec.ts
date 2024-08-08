@@ -1,7 +1,7 @@
-import { ResumableTaskStoreNoSql } from '../src/resumable-task-store-nosql.js';
-import { DataStoreNoSql } from '../src/data-store-nosql.js';
-import { EventLogNoSql } from '../src/event-log-nosql.js';
-import { MessageStoreNoSql } from '../src/message-store-nosql.js';
+import { ResumableTaskStoreDynamoDB } from '../src/resumable-task-store-dynamodb.js';
+import { DataStoreDynamoDB } from '../src/data-store-dynamodb.js';
+import { EventLogDynamoDB } from '../src/event-log-dynamodb.js';
+import { MessageStoreDynamoDB } from '../src/message-store-dynamodb.js';
 import { TestSuite } from '@tbd54566975/dwn-sdk-js/tests';
 
 // Remove when we Node.js v18 is no longer supported by this project.
@@ -14,10 +14,10 @@ describe('NoSQL Store Test Suite', () => {
 
   describe('DynamoDB Support', () => {
     TestSuite.runStoreDependentTests({
-      messageStore       : new MessageStoreNoSql(),
-      dataStore          : new DataStoreNoSql(),
-      eventLog           : new EventLogNoSql(),
-      resumableTaskStore : new ResumableTaskStoreNoSql(),
+      messageStore       : new MessageStoreDynamoDB(),
+      dataStore          : new DataStoreDynamoDB(),
+      eventLog           : new EventLogDynamoDB(),
+      resumableTaskStore : new ResumableTaskStoreDynamoDB(),
     });
   });
 
