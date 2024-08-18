@@ -15,7 +15,8 @@ DynamoDB NoSQL backed implementations of DWN `MessageStore`, `DataStore`, `Event
   - [Running Tests](#running-tests)
   - [`npm` scripts](#npm-scripts)
   - [Environment Variables](#environment-variables)
-
+- [Developers Journal](#developers-journal)
+- [Tips](#tips)
 
 # Supported DBs
 * AWS DynamoDB ✔️
